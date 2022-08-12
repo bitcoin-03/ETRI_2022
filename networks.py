@@ -1,4 +1,4 @@
-'''
+"""
 AI Fashion Coordinator
 (Baseline For Fashion-How Challenge)
 
@@ -25,9 +25,12 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 Update: 2022.04.20.
-'''
+"""
 import torch.nn as nn
 import torchvision.models as models
+
+from efficientnet_pytorch import EfficientNet
+
 
 class ResExtractor(nn.Module):
     """Feature extractor based on ResNet structure
@@ -40,35 +43,35 @@ class ResExtractor(nn.Module):
                     'False' if you want to train from scratch.
     """
 
-    def __init__(self, resnetnum='50', pretrained=True):
+    def __init__(self, resnetnum="50", pretrained=True):
         super(ResExtractor, self).__init__()
 
-        if resnetnum == '18':
+        if resnetnum == "18":
             self.resnet = models.resnet18(pretrained=pretrained)
-        elif resnetnum == '34':
+        elif resnetnum == "34":
             self.resnet = models.resnet34(pretrained=pretrained)
-        elif resnetnum == '50':
+        elif resnetnum == "50":
             self.resnet = models.resnet50(pretrained=pretrained)
-        elif resnetnum == '101':
+        elif resnetnum == "101":
             self.resnet = models.resnet101(pretrained=pretrained)
-        elif resnetnum == '152':
+        elif resnetnum == "152":
             self.resnet = models.resnet152(pretrained=pretrained)
 
         self.modules_front = list(self.resnet.children())[:-2]
         self.model_front = nn.Sequential(*self.modules_front)
 
     def front(self, x):
-        """ In the resnet structure, input 'x' passes through conv layers except for fc layers. """
+        """In the resnet structure, input 'x' passes through conv layers except for fc layers."""
         return self.model_front(x)
 
 
 class Baseline_ResNet_emo(nn.Module):
-    """ Classification network of emotion categories based on ResNet18 structure. """
-    
+    """Classification network of emotion categories based on ResNet18 structure."""
+
     def __init__(self):
         super(Baseline_ResNet_emo, self).__init__()
 
-        self.encoder = ResExtractor('18')
+        self.encoder = ResExtractor("18")
         self.avg_pool = nn.AvgPool2d(kernel_size=7)
 
         self.daily_linear = nn.Linear(512, 7)
@@ -76,8 +79,8 @@ class Baseline_ResNet_emo(nn.Module):
         self.embel_linear = nn.Linear(512, 3)
 
     def forward(self, x):
-        """ Forward propagation with input 'x' """
-        feat = self.encoder.front(x['image'])
+        """Forward propagation with input 'x'"""
+        feat = self.encoder.front(x["image"])
         flatten = self.avg_pool(feat).squeeze()
 
         out_daily = self.daily_linear(flatten)
@@ -87,5 +90,38 @@ class Baseline_ResNet_emo(nn.Module):
         return out_daily, out_gender, out_embel
 
 
-if __name__ == '__main__':
+# 버전을 입력받으면 그에 맞게 EfficientNet-b0 ~ b7, v2까지 구현할 예정입니다.
+class EfficientNet_emo(nn.Module):
+    def __init__(self, pretrained=True):
+        super().__init__()
+
+        model = EfficientNet.from_pretrained("efficientnet-b1")
+        # print(model)
+        self.enc = model
+        # print(self.enc)
+
+        nc = list(model.children())[-2].in_features
+        self.head = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),
+            nn.Flatten(),
+            nn.Linear(nc, 512),
+            nn.BatchNorm1d(512),
+            nn.Dropout(),
+        )
+        self.daily_linear = nn.Linear(512, 7)
+        self.gender_linear = nn.Linear(512, 6)
+        self.embel_linear = nn.Linear(512, 3)
+
+    def forward(self, x):
+        x = self.enc.extract_features(x["image"])
+        x = self.head(x)
+
+        out_daily = self.daily_linear(x)
+        out_gender = self.gender_linear(x)
+        out_embel = self.embel_linear(x)
+
+        return out_daily, out_gender, out_embel
+
+
+if __name__ == "__main__":
     pass
