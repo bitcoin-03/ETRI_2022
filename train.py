@@ -79,7 +79,8 @@ def main():
     # 모델은 parser로 network.py에 구현되어 있는 클래스 이름을 입력받아서 생성되게끔 했습니다.
     print("Loading model...")
     # net = EfficientNet_emo().to(DEVICE)
-    net = a.model()
+    if a.model == "Baseline_ResNet_emo": net = Baseline_ResNet_emo.to(DEVICE)
+    elif a.model == "EfficientNet_emo": net = EfficientNet_emo().to(DEVICE)
 
     print("Loading data....")
     # 경로는 각자 맞춰주시면 될것같습니다.
