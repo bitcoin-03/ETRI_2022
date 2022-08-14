@@ -26,6 +26,7 @@ SOFTWARE.
 
 Update: 2022.04.20.
 '''
+from xml.dom import NotFoundErr
 import torch.utils.data
 import numpy as np
 from torchvision import transforms
@@ -108,9 +109,12 @@ class BBoxCrop(object):
 class ETRIDataset_emo(torch.utils.data.Dataset):
     """ Dataset containing emotion categories (Daily, Gender, Embellishment). """
 
-    def __init__(self, df, base_path):
+    def __init__(self, df, base_path, type: str='train'):
         self.df = df
         self.base_path = base_path
+        self.type = type
+        if self.type not in ['train', 'val']:
+            raise KeyError(f'Type [{self.type}] is an invalid type')
         self.bbox_crop = BBoxCrop()
         self.background = BackGround(224)
         self.to_tensor = transforms.ToTensor()
@@ -122,9 +126,8 @@ class ETRIDataset_emo(torch.utils.data.Dataset):
                                                 std=[1 / 0.229, 1 / 0.224, 1 / 0.225])
         self.to_pil = transforms.ToPILImage()
 
-
     def __getitem__(self, i):
-        sample = self.df.iloc[i]
+        sample = self.df[self.df.Split == self.type].iloc[i]
         image = io.imread(self.base_path + sample['image_name'])
         if image.shape[2] != 3:
             image = color.rgba2rgb(image)
@@ -155,4 +158,4 @@ class ETRIDataset_emo(torch.utils.data.Dataset):
         return ret
 
     def __len__(self):
-        return len(self.df)
+        return len(self.df[self.df.Split == self.type])
