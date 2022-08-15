@@ -37,7 +37,9 @@ import time
 import torch
 import torch.utils.data
 import torch.utils.data.distributed
-
+import wandb
+from pathlib import Path
+import glob, re
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--model", type=str, default="Baseline_ResNet_emo")
@@ -61,18 +63,41 @@ parser.add_argument(
 parser.add_argument(
     "--seed", default=None, type=int, help="seed for initializing training. "
 )
+# models 안에 저장되는 이름과 wandb 실험 앞에 붙는 이름입니다. 
+parser.add_argument("--name", default="exp", help="model save at {exp_num}_모델이름")
+# 실험에 대한 설명입니다.(실험 구분 목적) wandb에 exp_모델이름 뒤에 붙습니다.
+parser.add_argument("--explan", default="", help="experiment description, ex. exp_efficientnet_{explan}")
 
 a = parser.parse_args()
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(DEVICE)
 
+def increment_path(path, exist_ok=False):
+    """ Automatically increment path, i.e. runs/exp --> runs/exp0, runs/exp1 etc.
+    Args:
+        path (str or pathlib.Path): f"{model_dir}/{args.name}".
+        exist_ok (bool): whether increment path (increment if False).
+    """
+    path = Path(path)
+    if (path.exists() and exist_ok) or (not path.exists()):
+        return f"{path}"
+    else:
+        dirs = glob.glob(f"{path}*")
+        matches = [
+            re.search(rf"%s(\d+)" % path.stem, d) for d in dirs
+        ]
+        i = [int(m.groups()[0]) for m in matches if m] 
+        n = max(i) + 1 if i else 2
+        return f"{path}{n}"
 
 def main():
     """The main function for model training."""
     if os.path.exists("models") is False:
         os.makedirs("models")
 
-    save_path = "models/" + a.version
+    # save_path = "models/" + a.version
+    # models 폴더에 exp, exp1, ....expN 으로 저장됩니다.
+    save_path = increment_path(os.path.join('models/', a.name))
     if os.path.exists(save_path) is False:
         os.makedirs(save_path)
 
@@ -100,6 +125,17 @@ def main():
     total_step = len(train_dataloader)
     step = 0
     t0 = time.time()
+
+    # wandb
+    """
+    project = "본인 프로젝트 이름", 
+    name="실험 이름, default=exp_모델명"
+    """
+    increment_name = save_path.split('/')[-1]
+    model_explan = f"{'_'+a.explan if a.explan else ''}"
+    wandb.init(project="model-test", name=f"{increment_name}_{a.model}{model_explan}", entity="bitcoin-etri", config=a)
+    wandb.save()
+    wandb.watch(net)
 
     print("Preparing Train....")
     for epoch in range(a.epochs):
@@ -139,6 +175,15 @@ def main():
                 )
 
                 t0 = time.time()
+            # wandb
+            wandb.log(
+                {
+                    "loss": loss.item(),
+                    "loss_daily": loss_daily.item(),
+                    "loss_gender": loss_gender.item(),
+                    "loss_embel": loss_embel.item(),
+                }
+            )
 
         if (epoch + 1) % 10 == 0:
             a.lr *= 0.9
