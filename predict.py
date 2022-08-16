@@ -1,4 +1,4 @@
-'''
+"""
 AI Fashion Coordinator
 (Baseline For Fashion-How Challenge)
 
@@ -25,7 +25,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 Update: 2022.04.20.
-'''
+"""
 from dataset import ETRIDataset_emo
 from networks import *
 
@@ -37,18 +37,23 @@ import torch
 import torch.utils.data
 import torch.utils.data.distributed
 
-DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 def main():
-    """ The main function of the test process for performance measurement. """
-    net = Baseline_ResNet_emo().to(DEVICE)
-    trained_weights = torch.load('./models/Baseline_ResNet_emo/model_100.pkl', map_location=DEVICE)
+    """The main function of the test process for performance measurement."""
+    # 제출하실때 trained_weights 경로와 df, dataset 경로만 바꾸시면 됩니다.
+    net = EfficientNet_emo().to(DEVICE)
+    trained_weights = torch.load(
+        "./models/exp_jaeookk/model_40.pkl", map_location=DEVICE
+    )
     net.load_state_dict(trained_weights)
 
-    df = pd.read_csv('../data/task1/info_etri20_emotion_test.csv')
-    val_dataset = ETRIDataset_emo(df, base_path='../data/task1/test/')
-    val_dataloader = torch.utils.data.DataLoader(val_dataset, batch_size=64, shuffle=False, num_workers=0)
+    df = pd.read_csv("../data/task1/info_etri20_emotion_test.csv")
+    val_dataset = ETRIDataset_emo(df, base_path="../data/task1/test/")
+    val_dataloader = torch.utils.data.DataLoader(
+        val_dataset, batch_size=1, shuffle=False, num_workers=0
+    )
 
     daily_pred_list = np.array([])
     gender_pred_list = np.array([])
@@ -71,12 +76,12 @@ def main():
         _, embel_indx = embel_pred.max(1)
         embel_pred_list = np.concatenate([embel_pred_list, embel_indx.cpu()], axis=0)
 
-    df['Daily'] = daily_pred_list.astype(int)
-    df['Gender'] = gender_pred_list.astype(int)
-    df['Embellishment'] = embel_pred_list.astype(int)
+    df["Daily"] = daily_pred_list.astype(int)
+    df["Gender"] = gender_pred_list.astype(int)
+    df["Embellishment"] = embel_pred_list.astype(int)
     # 제출시 생성 위치는 기본적으로 /home/work/model/prediction.csv로
-    df.to_csv('/home/work/model/prediction.csv', index=False)
+    df.to_csv("/home/work/model/prediction.csv", index=False)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

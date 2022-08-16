@@ -29,7 +29,17 @@ Update: 2022.04.20.
 import torch.nn as nn
 import torchvision.models as models
 
-from efficientnet_pytorch import EfficientNet
+### 라이브러리 설치 ####
+import subprocess
+import sys
+
+try:
+    from efficientnet_pytorch import EfficientNet
+except ImportError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", 'efficientnet_pytorch'])
+finally:
+    from efficientnet_pytorch import EfficientNet
+##########################
 
 
 class ResExtractor(nn.Module):
