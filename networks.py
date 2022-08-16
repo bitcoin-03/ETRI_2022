@@ -91,14 +91,44 @@ class Baseline_ResNet_emo(nn.Module):
 
 
 # 버전을 입력받으면 그에 맞게 EfficientNet-b0 ~ b7, v2까지 구현할 예정입니다.
-class EfficientNet_emo(nn.Module):
-    def __init__(self, pretrained=True):
-        super().__init__()
+# class EfficientNet_emo(nn.Module):
+#     def __init__(self, pretrained=True):
+#         super().__init__()
 
+#         model = EfficientNet.from_pretrained("efficientnet-b1")
+#         # print(model)
+#         self.enc = model
+#         # print(self.enc)
+
+#         nc = list(model.children())[-2].in_features
+#         self.head = nn.Sequential(
+#             nn.AdaptiveAvgPool2d(1),
+#             nn.Flatten(),
+#             nn.Linear(nc, 512),
+#             nn.BatchNorm1d(512),
+#             nn.Dropout(),
+#         )
+#         self.daily_linear = nn.Linear(512, 7)
+#         self.gender_linear = nn.Linear(512, 6)
+#         self.embel_linear = nn.Linear(512, 3)
+
+#     def forward(self, x):
+#         x = self.enc.extract_features(x["image"])
+#         x = self.head(x)
+
+#         out_daily = self.daily_linear(x)
+#         out_gender = self.gender_linear(x)
+#         out_embel = self.embel_linear(x)
+
+#         return out_daily, out_gender, out_embel
+
+
+class EfficientNet_emo(nn.Module):
+    def __init__(self):
+        super(EfficientNet_emo, self).__init__()
         model = EfficientNet.from_pretrained("efficientnet-b1")
-        # print(model)
-        self.enc = model
-        # print(self.enc)
+        tmp = list(model.children())[:-4]
+        self.enc = nn.Sequential(tmp[0], tmp[1], *tmp[2], *tmp[3:])
 
         nc = list(model.children())[-2].in_features
         self.head = nn.Sequential(
@@ -113,7 +143,7 @@ class EfficientNet_emo(nn.Module):
         self.embel_linear = nn.Linear(512, 3)
 
     def forward(self, x):
-        x = self.enc.extract_features(x["image"])
+        x = self.enc(x["image"])
         x = self.head(x)
 
         out_daily = self.daily_linear(x)
