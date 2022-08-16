@@ -95,6 +95,7 @@ def increment_path(path, exist_ok=False):
         n = max(i) + 1 if i else 2
         return f"{path}{n}"
 
+
 def main():
     """The main function for model training."""
     if os.path.exists("models") is False:
@@ -109,34 +110,30 @@ def main():
     # 모델은 parser로 network.py에 구현되어 있는 클래스 이름을 입력받아서 생성되게끔 했습니다.
     print("Loading model...")
     # net = EfficientNet_emo().to(DEVICE)
-    if a.model == "Baseline_ResNet_emo": 
+    if a.model == "Baseline_ResNet_emo":
         net = Baseline_ResNet_emo.to(DEVICE)
-    elif a.model == "EfficientNet_emo": 
+    elif a.model == "EfficientNet_emo":
         net = EfficientNet_emo().to(DEVICE)
 
     print("Loading data....")
     # 경로는 각자 맞춰주시면 될것같습니다.
-    df = pd.read_csv(
-        "task1_data/info_etri20_emotion_tr_val_simple.csv"
-    )
-    train_dataset = ETRIDataset_emo(
-        df, base_path="task1_data/train/"
-    )
+    df = pd.read_csv("task1_data/info_etri20_emotion_tr_val_simple.csv")
+    train_dataset = ETRIDataset_emo(df, base_path="task1_data/train/")
     train_dataloader = torch.utils.data.DataLoader(
-        train_dataset, 
-        batch_size=a.batch_size, 
-        shuffle=True, 
+        train_dataset,
+        batch_size=a.batch_size,
+        shuffle=True,
         num_workers=torch.cuda.device_count() * 4,
         pin_memory=True,
     )
 
     val_dataset = ETRIDataset_emo(
-        df, base_path="task1_data/train/", type='val' # Type 은 train, val 이 가능합니다.
+        df, base_path="task1_data/train/", type="val"  # Type 은 train, val 이 가능합니다.
     )
     val_dataloader = torch.utils.data.DataLoader(
-        val_dataset, 
-        batch_size=a.batch_size, 
-        shuffle=True, 
+        val_dataset,
+        batch_size=a.batch_size,
+        shuffle=True,
         num_workers=torch.cuda.device_count() * 4,
         pin_memory=True,
     )
@@ -150,11 +147,9 @@ def main():
         optimizer = torch.optim.Adam(net.parameters(), lr=checkpoint["lr"])
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         resume_epoch = checkpoint["epoch"]
-        epochs = a.epochs
         loss = checkpoint["loss"]
     else:
         optimizer = torch.optim.Adam(net.parameters(), lr=a.lr)
-        epochs = a.epochs
 
     # optimizer = torch.optim.Adam(net.parameters(), lr=a.lr)
     criterion = nn.CrossEntropyLoss().to(DEVICE)
@@ -182,7 +177,7 @@ def main():
     wandb.watch(net)
 
     print("Preparing Train....")
-    for epoch in range(a.epochs):
+    for epoch in range(resume_epoch, a.epochs):
         # Train loop
         net.train()
         t1 = time.time()
@@ -233,7 +228,7 @@ def main():
 
         # Validation loop
         with torch.no_grad():
-            print('Calculating validation results...')
+            print("Calculating validation results...")
             net.eval()
 
             for i, val_batch in enumerate(val_dataloader):
@@ -264,7 +259,7 @@ def main():
                         )
                     )
 
-                    t0 = time.time()                
+                    t0 = time.time()
                 # wandb
                 wandb.log(
                     {
