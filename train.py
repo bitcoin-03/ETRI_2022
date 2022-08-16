@@ -242,9 +242,9 @@ def main():
 
                 val_out_daily, val_out_gender, val_out_embel = net(val_batch)
 
-                val_loss_daily = criterion(val_out_daily, sample["daily_label"])
-                val_loss_gender = criterion(val_out_gender, sample["gender_label"])
-                val_loss_embel = criterion(val_out_embel, sample["embel_label"])
+                val_loss_daily = criterion(val_out_daily, val_batch["daily_label"])
+                val_loss_gender = criterion(val_out_gender, val_batch["gender_label"])
+                val_loss_embel = criterion(val_out_embel, val_batch["embel_label"])
                 val_loss = val_loss_daily + val_loss_gender + val_loss_embel
 
                 if (i + 1) % 10 == 0:
