@@ -109,12 +109,14 @@ class BBoxCrop(object):
 class ETRIDataset_emo(torch.utils.data.Dataset):
     """ Dataset containing emotion categories (Daily, Gender, Embellishment). """
 
-    def __init__(self, df, base_path, type: str='train'):
+    def __init__(self, df, base_path, type: str='train', split_col: str=None):
         self.df = df
         self.base_path = base_path
         self.type = type
         if self.type not in ['train', 'val']:
             raise KeyError(f'Type [{self.type}] is an invalid type')
+        if split_col:
+            self.split_col = split_col
         self.bbox_crop = BBoxCrop()
         self.background = BackGround(224)
         self.to_tensor = transforms.ToTensor()
@@ -127,7 +129,10 @@ class ETRIDataset_emo(torch.utils.data.Dataset):
         self.to_pil = transforms.ToPILImage()
 
     def __getitem__(self, i):
-        sample = self.df[self.df.Split == self.type].iloc[i]
+        if self.split_col:
+            sample = self.df[self.df[self.split_col] == self.type].iloc[i]
+        else:
+            sample = self.df[self.df.Split == self.type].iloc[i]
         image = io.imread(self.base_path + sample['image_name'])
         if image.shape[2] != 3:
             image = color.rgba2rgb(image)
