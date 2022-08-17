@@ -26,6 +26,20 @@ SOFTWARE.
 
 Update: 2022.04.20.
 """
+### 라이브러리 설치 ####
+import subprocess
+import sys
+
+try:
+    from albumentations import *
+except ImportError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "albumentations"])
+finally:
+    from albumentations import *
+from albumentations.pytorch import ToTensorV2
+
+##########################
+
 from dataset import ETRIDataset_emo
 from networks import *
 
@@ -40,6 +54,7 @@ import torch.utils.data.distributed
 import wandb
 from pathlib import Path
 import glob, re
+
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--model", type=str, default="Baseline_ResNet_emo")
@@ -96,6 +111,37 @@ def increment_path(path, exist_ok=False):
         return f"{path}{n}"
 
 
+def get_transforms(need=("train", "val")):
+    transformations = {}
+    if "train" in need:
+        transformations["train"] = Compose(
+            [
+                HorizontalFlip(p=0.5),
+                # ShiftScaleRotate(p=0.5),
+                HueSaturationValue(
+                    hue_shift_limit=0.2,
+                    sat_shift_limit=0.2,
+                    val_shift_limit=0.2,
+                    p=0.5,
+                ),
+                RandomBrightnessContrast(
+                    brightness_limit=(-0.1, 0.1), contrast_limit=(-0.1, 0.1), p=0.5
+                ),
+                ColorJitter(p=0.5),
+                ToTensorV2(p=1.0),
+            ],
+            p=1.0,
+        )
+    if "val" in need:
+        transformations["val"] = Compose(
+            [
+                ToTensorV2(p=1.0),
+            ],
+            p=1.0,
+        )
+    return transformations
+
+
 def main():
     """The main function for model training."""
     if os.path.exists("models") is False:
@@ -117,8 +163,16 @@ def main():
 
     print("Loading data....")
     # 경로는 각자 맞춰주시면 될것같습니다.
-    df = pd.read_csv("task1_data/info_etri20_emotion_tr_val_simple.csv")
-    train_dataset = ETRIDataset_emo(df, base_path="task1_data/train/")
+    aug = get_transforms()
+    df = pd.read_csv(
+        "../TEAM비뜨코인/ETRI_Season3/task1_data/info_etri20_emotion_tr_val_simple.csv"
+    )
+    train_dataset = ETRIDataset_emo(
+        df,
+        base_path="../TEAM비뜨코인/ETRI_Season3/task1_data/train/",
+        transform=aug["train"],
+    )
+
     train_dataloader = torch.utils.data.DataLoader(
         train_dataset,
         batch_size=a.batch_size,
@@ -128,7 +182,10 @@ def main():
     )
 
     val_dataset = ETRIDataset_emo(
-        df, base_path="task1_data/train/", type="val"  # Type 은 train, val 이 가능합니다.
+        df,
+        base_path="../TEAM비뜨코인/ETRI_Season3/task1_data/train/",
+        type="val",
+        transform=aug["val"],
     )
     val_dataloader = torch.utils.data.DataLoader(
         val_dataset,
@@ -140,7 +197,7 @@ def main():
 
     if a.resume_from:
         # 저장했던 중간 모델 정보를 읽습니다.
-        path = save_path + "/" + a.resume_from
+        path = "models/" + a.resume_from
         checkpoint = torch.load(path)
         net.load_state_dict(checkpoint["model_state_dict"])
 
@@ -149,6 +206,7 @@ def main():
         resume_epoch = checkpoint["epoch"]
         loss = checkpoint["loss"]
     else:
+        resume_epoch = 0
         optimizer = torch.optim.Adam(net.parameters(), lr=a.lr)
 
     # optimizer = torch.optim.Adam(net.parameters(), lr=a.lr)
@@ -200,7 +258,7 @@ def main():
 
             if (i + 1) % 10 == 0:
                 print(
-                    "Train process"
+                    "Train process "
                     "Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}, "
                     "Loss_daily: {:.4f}, Loss_gender: {:.4f}, Loss_embel: {:.4f}, Time : {:2.3f}".format(
                         epoch + 1,
@@ -244,7 +302,7 @@ def main():
 
                 if (i + 1) % 10 == 0:
                     print(
-                        "Validation process"
+                        "Validation process "
                         "Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}, "
                         "Loss_daily: {:.4f}, Loss_gender: {:.4f}, Loss_embel: {:.4f}, Time : {:2.3f}".format(
                             epoch + 1,
