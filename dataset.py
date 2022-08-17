@@ -115,8 +115,7 @@ class ETRIDataset_emo(torch.utils.data.Dataset):
         self.type = type
         if self.type not in ['train', 'val']:
             raise KeyError(f'Type [{self.type}] is an invalid type')
-        if split_col:
-            self.split_col = split_col
+        self.split_col = split_col
         self.bbox_crop = BBoxCrop()
         self.background = BackGround(224)
         self.to_tensor = transforms.ToTensor()
