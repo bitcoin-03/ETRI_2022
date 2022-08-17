@@ -163,4 +163,7 @@ class ETRIDataset_emo(torch.utils.data.Dataset):
         return ret
 
     def __len__(self):
-        return len(self.df[self.df.Split == self.type])
+        if self.split_col:
+            return len(self.df[self.df[self.split_col] == self.type])
+        else:
+            return len(self.df[self.df.Split == self.type])
