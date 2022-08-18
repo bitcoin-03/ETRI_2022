@@ -52,8 +52,12 @@ import torch
 import torch.utils.data
 import torch.utils.data.distributed
 import wandb
+import random
+import numpy as np
 from pathlib import Path
 import glob, re
+
+
 
 
 parser = argparse.ArgumentParser()
@@ -233,7 +237,7 @@ def main():
     )
     wandb.save()
     wandb.watch(net)
-
+    val_images = []
     print("Preparing Train....")
     for epoch in range(resume_epoch, a.epochs):
         # Train loop
@@ -283,7 +287,11 @@ def main():
                     "loss_embel": loss_embel.item(),
                 }
             )
-
+        val_loss_items = {
+            'daily_val_loss': [],
+            'gender_val_loss': [],
+            'embel_val_loss': [],
+        }
         # Validation loop
         with torch.no_grad():
             print("Calculating validation results...")
@@ -294,39 +302,67 @@ def main():
                     val_batch[key] = val_batch[key].to(DEVICE)
 
                 val_out_daily, val_out_gender, val_out_embel = net(val_batch)
+                
+                preds = (
+                    torch.argmax(val_out_daily, dim=-1),
+                    torch.argmax(val_out_gender, dim=-1),
+                    torch.argmax(val_out_embel, dim=-1)
+                )
+                val_loss_items['daily_val_loss'].append(criterion(val_out_daily, val_batch["daily_label"],7).item())
+                val_loss_items['gender_val_loss'].append(criterion(val_out_gender, val_batch["gender_label"],6).item())
+                val_loss_items['embel_val_loss'].append(criterion(val_out_embel, val_batch["embel_label"],3).item())
 
-                val_loss_daily = criterion(val_out_daily, val_batch["daily_label"])
-                val_loss_gender = criterion(val_out_gender, val_batch["gender_label"])
-                val_loss_embel = criterion(val_out_embel, val_batch["embel_label"])
-                val_loss = val_loss_daily + val_loss_gender + val_loss_embel
-
-                if (i + 1) % 10 == 0:
-                    print(
-                        "Validation process "
-                        "Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}, "
-                        "Loss_daily: {:.4f}, Loss_gender: {:.4f}, Loss_embel: {:.4f}, Time : {:2.3f}".format(
-                            epoch + 1,
-                            a.epochs,
-                            i + 1,
-                            val_total_step,
-                            val_loss.item(),
-                            val_loss_daily.item(),
-                            val_loss_gender.item(),
-                            val_loss_embel.item(),
-                            time.time() - t0,
+                d = random.randint(0, len(val_dataloader) - 1)
+                daily_list = ['실내복', '가벼운 외출', '오피스룩', '격식차린', '이벤트', '교복', '운동복']
+                gender_list = ['밀리터리', '매니쉬', '유니섹스', '걸리쉬', '우아한', '섹시한']
+                embellishment_list = ['장식이 없는', '포인트 장식이 있는', '장식이 많은']
+                
+                if len(val_images) < (epoch+1)*2:
+                    val_images.append(
+                        wandb.Image(
+                        val_batch['image'][d],
+                        caption='''
+                            Pred/Truth
+                            일상성 : {} / {}, 
+                            성 : {} / {}, 
+                            장식성 : {} / {}
+                        '''.format(
+                            daily_list[preds[0][d].item()],
+                            daily_list[val_batch["daily_label"][d]], 
+                            gender_list[preds[1][d].item()],
+                            gender_list[val_batch["gender_label"][d]], 
+                            embellishment_list[preds[2][d].item()],
+                            embellishment_list[val_batch["embel_label"][d]]
+                            )
                         )
                     )
 
-                    t0 = time.time()
-                # wandb
-                wandb.log(
-                    {
-                        "val_loss": val_loss.item(),
-                        "val_loss_daily": val_loss_daily.item(),
-                        "val_loss_gender": val_loss_gender.item(),
-                        "val_loss_embel": val_loss_embel.item(),
-                    }
+            val_loss = [np.sum(list(val_loss_items.values())[i])/len(val_dataloader) for i in range(3)]
+            print(
+                "Validation process "
+                "Epoch [{}/{}], Loss: {:.4f}, "
+                "Loss_daily: {:.4f}, Loss_gender: {:.4f}, Loss_embel: {:.4f}, Time : {:2.3f}".format(
+                    epoch + 1,
+                    a.epochs,
+                    np.sum(val_loss),
+                    val_loss[0],
+                    val_loss[1],
+                    val_loss[2],
+                    time.time() - t0,
                 )
+            )
+            t0 = time.time()
+            # wandb
+            wandb.log(
+                {
+                    "Examples": val_images,
+                    "val_loss": np.sum(val_loss),
+                    "val_loss_daily": val_loss[0],
+                    "val_loss_gender": val_loss[1],
+                    "val_loss_embel": val_loss[2],
+                }
+            )
+        
         if (epoch + 1) % 10 == 0:
             a.lr *= 0.9
             optimizer = torch.optim.Adam(net.parameters(), lr=a.lr)
