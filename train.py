@@ -308,9 +308,9 @@ def main():
                     torch.argmax(val_out_gender, dim=-1),
                     torch.argmax(val_out_embel, dim=-1)
                 )
-                val_loss_items['daily_val_loss'].append(criterion(val_out_daily, val_batch["daily_label"],7).item())
-                val_loss_items['gender_val_loss'].append(criterion(val_out_gender, val_batch["gender_label"],6).item())
-                val_loss_items['embel_val_loss'].append(criterion(val_out_embel, val_batch["embel_label"],3).item())
+                val_loss_items['daily_val_loss'].append(criterion(val_out_daily, val_batch["daily_label"]).item())
+                val_loss_items['gender_val_loss'].append(criterion(val_out_gender, val_batch["gender_label"]).item())
+                val_loss_items['embel_val_loss'].append(criterion(val_out_embel, val_batch["embel_label"]).item())
 
                 d = random.randint(0, len(val_dataloader) - 1)
                 daily_list = ['실내복', '가벼운 외출', '오피스룩', '격식차린', '이벤트', '교복', '운동복']
