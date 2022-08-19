@@ -237,7 +237,6 @@ def main():
     )
     wandb.save()
     wandb.watch(net)
-    val_images = []
     print("Preparing Train....")
     for epoch in range(resume_epoch, a.epochs):
         # Train loop
@@ -287,6 +286,7 @@ def main():
                     "loss_embel": loss_embel.item(),
                 }
             )
+        val_images = []
         val_loss_items = {
             'daily_val_loss': [],
             'gender_val_loss': [],
@@ -317,7 +317,7 @@ def main():
                 gender_list = ['밀리터리', '매니쉬', '유니섹스', '걸리쉬', '우아한', '섹시한']
                 embellishment_list = ['장식이 없는', '포인트 장식이 있는', '장식이 많은']
                 
-                if len(val_images) < (epoch+1)*2:
+                if len(val_images) <= 108:
                     val_images.append(
                         wandb.Image(
                         val_batch['image'][d],
