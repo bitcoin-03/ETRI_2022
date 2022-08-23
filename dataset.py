@@ -32,6 +32,8 @@ import numpy as np
 from torchvision import transforms
 from skimage import io, transform, color
 
+import cv2
+
 class BackGround(object):
     """Operator that resizes to the desired size while maintaining the ratio
         fills the remaining part with a black background
@@ -109,7 +111,7 @@ class BBoxCrop(object):
 class ETRIDataset_emo(torch.utils.data.Dataset):
     """ Dataset containing emotion categories (Daily, Gender, Embellishment). """
 
-    def __init__(self, df, base_path, type: str='train', split_col: str=None):
+    def __init__(self, df, base_path, type: str='train', split_col: str=None, transform = None):
         self.df = df
         self.base_path = base_path
         self.type = type
@@ -121,6 +123,7 @@ class ETRIDataset_emo(torch.utils.data.Dataset):
         self.to_tensor = transforms.ToTensor()
         self.normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                               std=[0.229, 0.224, 0.225])
+        self.transform = transform
 
         # for vis
         self.unnormalize = transforms.Normalize(mean=[-0.485 / 0.229, -0.456 / 0.224, -0.406 / 0.225],
@@ -132,9 +135,11 @@ class ETRIDataset_emo(torch.utils.data.Dataset):
             sample = self.df[self.df[self.split_col] == self.type].iloc[i]
         else:
             sample = self.df[self.df.Split == self.type].iloc[i]
-        image = io.imread(self.base_path + sample['image_name'])
-        if image.shape[2] != 3:
-            image = color.rgba2rgb(image)
+        # image = io.imread(self.base_path + sample['image_name'])
+        image = cv2.imread(self.base_path + sample['image_name'])
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        # if image.shape[2] != 3:
+        #     image = color.rgba2rgb(image)
         daily_label = sample['Daily']
         gender_label = sample['Gender']
         embel_label = sample['Embellishment']
@@ -148,9 +153,13 @@ class ETRIDataset_emo(torch.utils.data.Dataset):
 
         image_ = image.copy()
 
-        image_ = self.to_tensor(image_)
-        image_ = self.normalize(image_)
-        image_ = image_.float()
+        # image_ = self.to_tensor(image_)
+        # image_ = self.normalize(image_)
+        image_=image_.astype(np.float32)
+        
+        if self.transform:
+            image_ = self.transform(image=image_)["image"]
+            
 
         ret = {}
         ret['ori_image'] = image
