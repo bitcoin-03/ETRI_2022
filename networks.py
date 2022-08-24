@@ -36,7 +36,9 @@ import sys
 try:
     from efficientnet_pytorch import EfficientNet
 except ImportError:
-    subprocess.check_call([sys.executable, "-m", "pip", "install", 'efficientnet_pytorch'])
+    subprocess.check_call(
+        [sys.executable, "-m", "pip", "install", "efficientnet_pytorch"]
+    )
 finally:
     from efficientnet_pytorch import EfficientNet
 ##########################
@@ -100,6 +102,74 @@ class Baseline_ResNet_emo(nn.Module):
         return out_daily, out_gender, out_embel
 
 
+class EfficientNet_emo(nn.Module):
+    def __init__(self):
+        super(EfficientNet_emo, self).__init__()
+        model = EfficientNet.from_pretrained("efficientnet-b1")
+        tmp = list(model.children())[:-4]
+        self.enc = nn.Sequential(tmp[0], tmp[1], *tmp[2], *tmp[3:])
+
+        nc = list(model.children())[-2].in_features
+        self.head = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),
+            nn.Flatten(),
+            nn.Linear(nc, 512),
+            nn.BatchNorm1d(512),
+            nn.Dropout(),
+        )
+        self.daily_linear = nn.Linear(512, 7)
+        self.gender_linear = nn.Linear(512, 6)
+        self.embel_linear = nn.Linear(512, 3)
+
+    def forward(self, x):
+        x = self.enc(x["image"])
+        x = self.head(x)
+
+        out_daily = self.daily_linear(x)
+        out_gender = self.gender_linear(x)
+        out_embel = self.embel_linear(x)
+
+        return out_daily, out_gender, out_embel
+
+
+class EfficientNetV2_emo(nn.Module):
+    def __init__(self):
+        super(EfficientNetV2_emo, self).__init__()
+        model = torch.hub.load(
+            "hankyul2/EfficientNetV2-pytorch",
+            "efficientnet_v2_l",
+            pretrained=True,
+            nclass=1,
+        )
+        tmp = list(model.children())
+        nc = list(model.children())[2][-1].in_features
+
+        self.stem = tmp[0]
+        self.blocks = tmp[1]
+
+        self.head = nn.Sequential(
+            tmp[2][0],
+            nn.AdaptiveAvgPool2d((1, 1)),
+            nn.Flatten(),
+            nn.Dropout(p=0.1, inplace=True),
+        )
+
+        self.daily_linear = nn.Linear(nc, 7)
+        self.gender_linear = nn.Linear(nc, 6)
+        self.embel_linear = nn.Linear(nc, 3)
+
+    def forward(self, x):
+        x = self.stem(x["image"])
+        x = self.blocks(x)
+        x = self.head(x)
+
+        out_daily = self.daily_linear(x)
+        out_gender = self.gender_linear(x)
+        out_embel = self.embel_linear(x)
+
+        return out_daily, out_gender, out_embel
+
+
 # 버전을 입력받으면 그에 맞게 EfficientNet-b0 ~ b7, v2까지 구현할 예정입니다.
 # class EfficientNet_emo(nn.Module):
 #     def __init__(self, pretrained=True):
@@ -131,37 +201,6 @@ class Baseline_ResNet_emo(nn.Module):
 #         out_embel = self.embel_linear(x)
 
 #         return out_daily, out_gender, out_embel
-
-
-class EfficientNet_emo(nn.Module):
-    def __init__(self):
-        super(EfficientNet_emo, self).__init__()
-        model = EfficientNet.from_pretrained("efficientnet-b1")
-        tmp = list(model.children())[:-4]
-        self.enc = nn.Sequential(tmp[0], tmp[1], *tmp[2], *tmp[3:])
-
-        nc = list(model.children())[-2].in_features
-        self.head = nn.Sequential(
-            nn.AdaptiveAvgPool2d(1),
-            nn.Flatten(),
-            nn.Linear(nc, 512),
-            nn.BatchNorm1d(512),
-            nn.Dropout(),
-        )
-        self.daily_linear = nn.Linear(512, 7)
-        self.gender_linear = nn.Linear(512, 6)
-        self.embel_linear = nn.Linear(512, 3)
-
-    def forward(self, x):
-        x = self.enc(x["image"])
-        x = self.head(x)
-
-        out_daily = self.daily_linear(x)
-        out_gender = self.gender_linear(x)
-        out_embel = self.embel_linear(x)
-
-        return out_daily, out_gender, out_embel
-
 
 if __name__ == "__main__":
     pass
