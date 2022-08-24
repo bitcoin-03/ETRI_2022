@@ -312,7 +312,6 @@ def main():
                 val_loss_items['gender_val_loss'].append(criterion(val_out_gender, val_batch["gender_label"]).item())
                 val_loss_items['embel_val_loss'].append(criterion(val_out_embel, val_batch["embel_label"]).item())
 
-                d = random.randint(0, len(val_dataloader) - 1)
                 daily_list = ['실내복', '가벼운 외출', '오피스룩', '격식차린', '이벤트', '교복', '운동복']
                 gender_list = ['밀리터리', '매니쉬', '유니섹스', '걸리쉬', '우아한', '섹시한']
                 embellishment_list = ['장식이 없는', '포인트 장식이 있는', '장식이 많은']
@@ -327,12 +326,12 @@ def main():
                             성 : {} / {}, 
                             장식성 : {} / {}
                         '''.format(
-                            daily_list[preds[0][d].item()],
-                            daily_list[val_batch["daily_label"][d]], 
-                            gender_list[preds[1][d].item()],
-                            gender_list[val_batch["gender_label"][d]], 
-                            embellishment_list[preds[2][d].item()],
-                            embellishment_list[val_batch["embel_label"][d]]
+                            daily_list[preds[0][i].item()],
+                            daily_list[val_batch["daily_label"][i]], 
+                            gender_list[preds[1][i].item()],
+                            gender_list[val_batch["gender_label"][i]], 
+                            embellishment_list[preds[2][i].item()],
+                            embellishment_list[val_batch["embel_label"][i]]
                             )
                         )
                     )
