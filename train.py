@@ -146,7 +146,7 @@ def get_transforms(need=("train", "val")):
     return transformations
 
 
-def main():
+def main(model_target=None):
     """The main function for model training."""
     if os.path.exists("models") is False:
         os.makedirs("models")
@@ -163,18 +163,19 @@ def main():
     if a.model == "Baseline_ResNet_emo":
         net = Baseline_ResNet_emo.to(DEVICE)
     elif a.model == "EfficientNet_emo":
-        net = EfficientNet_emo().to(DEVICE)
+        net = EfficientNet_emo(model_target).to(DEVICE)
 
     print("Loading data....")
     # 경로는 각자 맞춰주시면 될것같습니다.
     aug = get_transforms()
     df = pd.read_csv(
-        "../TEAM비뜨코인/ETRI_Season3/task1_data/info_etri20_emotion_tr_val_simple.csv"
+        "task1_data/info_etri20_emotion_tr_val_each_target.csv"
     )
     train_dataset = ETRIDataset_emo(
         df,
-        base_path="../TEAM비뜨코인/ETRI_Season3/task1_data/train/",
+        base_path="task1_data/train/",
         transform=aug["train"],
+        split_col=model_target+"_Split",
     )
 
     train_dataloader = torch.utils.data.DataLoader(
@@ -187,9 +188,10 @@ def main():
 
     val_dataset = ETRIDataset_emo(
         df,
-        base_path="../TEAM비뜨코인/ETRI_Season3/task1_data/train/",
+        base_path="task1_data/train/",
         type="val",
         transform=aug["val"],
+        split_col=model_target+"_Split",
     )
     val_dataloader = torch.utils.data.DataLoader(
         val_dataset,
@@ -230,7 +232,7 @@ def main():
     increment_name = save_path.split("/")[-1]
     model_explan = f"{'_'+a.explan if a.explan else ''}"
     wandb.init(
-        project="model-test",
+        project="split_target",
         name=f"{increment_name}_{a.model}{model_explan}",
         entity="bitcoin-etri",
         config=a,
@@ -249,49 +251,82 @@ def main():
             for key in sample:
                 sample[key] = sample[key].to(DEVICE)
 
-            out_daily, out_gender, out_embel = net(sample)
+            if model_target == "Daily":
+                out_daily = net(sample)
+                loss = criterion(out_daily, sample["daily_label"])
+            elif model_target == "Gender":
+                out_gender = net(sample)
+                loss = criterion(out_gender, sample["gender_label"])
+            elif model_target == "Embellishment":
+                out_embel = net(sample)
+                loss = criterion(out_embel, sample["embel_label"])
+            else: 
+                out_daily, out_gender, out_embel = net(sample)
 
-            loss_daily = criterion(out_daily, sample["daily_label"])
-            loss_gender = criterion(out_gender, sample["gender_label"])
-            loss_embel = criterion(out_embel, sample["embel_label"])
-            loss = loss_daily + loss_gender + loss_embel
+                loss_daily = criterion(out_daily, sample["daily_label"])
+                loss_gender = criterion(out_gender, sample["gender_label"])
+                loss_embel = criterion(out_embel, sample["embel_label"])
+                loss = loss_daily + loss_gender + loss_embel
 
             loss.backward()
             optimizer.step()
 
             if (i + 1) % 10 == 0:
-                print(
-                    "Train process "
-                    "Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}, "
-                    "Loss_daily: {:.4f}, Loss_gender: {:.4f}, Loss_embel: {:.4f}, Time : {:2.3f}".format(
-                        epoch + 1,
-                        a.epochs,
-                        i + 1,
-                        total_step,
-                        loss.item(),
-                        loss_daily.item(),
-                        loss_gender.item(),
-                        loss_embel.item(),
-                        time.time() - t0,
+                try:
+                    print(
+                        "Train process "
+                        "Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}, "
+                        "Loss_daily: {:.4f}, Loss_gender: {:.4f}, Loss_embel: {:.4f}, Time : {:2.3f}".format(
+                            epoch + 1,
+                            a.epochs,
+                            i + 1,
+                            total_step,
+                            loss.item(),
+                            loss_daily.item(),
+                            loss_gender.item(),
+                            loss_embel.item(),
+                            time.time() - t0,
+                        )
                     )
-                )
+                except:
+                    print(
+                        "Train process "
+                        "Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}, ".format(
+                            epoch + 1,
+                            a.epochs,
+                            i + 1,
+                            total_step,
+                            loss.item(),
+                            time.time() - t0,
+                        )
+                    )
 
                 t0 = time.time()
             # wandb
-            wandb.log(
-                {
-                    "loss": loss.item(),
-                    "loss_daily": loss_daily.item(),
-                    "loss_gender": loss_gender.item(),
-                    "loss_embel": loss_embel.item(),
-                }
-            )
+            try:
+                wandb.log(
+                    {
+                        "loss": loss.item(),
+                        "loss_daily": loss_daily.item(),
+                        "loss_gender": loss_gender.item(),
+                        "loss_embel": loss_embel.item(),
+                    }
+                )
+            except:
+                wandb.log(
+                    {
+                        "loss": loss.item(),
+                    }
+                )
         val_images = []
-        val_loss_items = {
-            'daily_val_loss': [],
-            'gender_val_loss': [],
-            'embel_val_loss': [],
-        }
+        if model_target is None:
+            val_loss_items = {
+                'daily_val_loss': [],
+                'gender_val_loss': [],
+                'embel_val_loss': [],
+            }
+        else:
+            val_loss_items = []
         # Validation loop
         with torch.no_grad():
             print("Calculating validation results...")
@@ -301,67 +336,143 @@ def main():
                 for key in val_batch:
                     val_batch[key] = val_batch[key].to(DEVICE)
 
-                val_out_daily, val_out_gender, val_out_embel = net(val_batch)
-                
-                preds = (
-                    torch.argmax(val_out_daily, dim=-1),
-                    torch.argmax(val_out_gender, dim=-1),
-                    torch.argmax(val_out_embel, dim=-1)
-                )
-                val_loss_items['daily_val_loss'].append(criterion(val_out_daily, val_batch["daily_label"]).item())
-                val_loss_items['gender_val_loss'].append(criterion(val_out_gender, val_batch["gender_label"]).item())
-                val_loss_items['embel_val_loss'].append(criterion(val_out_embel, val_batch["embel_label"]).item())
+                if model_target is None:
+                    val_out_daily, val_out_gender, val_out_embel = net(val_batch)
+                    
+                    preds = (
+                        torch.argmax(val_out_daily, dim=-1),
+                        torch.argmax(val_out_gender, dim=-1),
+                        torch.argmax(val_out_embel, dim=-1)
+                    )
+                    val_loss_items['daily_val_loss'].append(criterion(val_out_daily, val_batch["daily_label"]).item())
+                    val_loss_items['gender_val_loss'].append(criterion(val_out_gender, val_batch["gender_label"]).item())
+                    val_loss_items['embel_val_loss'].append(criterion(val_out_embel, val_batch["embel_label"]).item())
+                else:
+                    val_out = net(val_batch)
 
-                d = random.randint(0, len(val_dataloader) - 1)
+                    preds = (
+                        torch.argmax(val_out, dim=-1)
+                    )
+                    if model_target == "Daily":
+                        val_loss_items.append(criterion(val_out, val_batch["daily_label"]))
+                    elif model_target == "Gender":
+                        val_loss_items.append(criterion(val_out, val_batch["gender_label"]))
+                    elif model_target == "Embellishment":
+                        val_loss_items.append(criterion(val_out, val_batch["embel_label"]))
+
+                d = random.randint(0, len(val_batch) - 1)
                 daily_list = ['실내복', '가벼운 외출', '오피스룩', '격식차린', '이벤트', '교복', '운동복']
                 gender_list = ['밀리터리', '매니쉬', '유니섹스', '걸리쉬', '우아한', '섹시한']
                 embellishment_list = ['장식이 없는', '포인트 장식이 있는', '장식이 많은']
                 
                 if len(val_images) <= 108:
-                    val_images.append(
-                        wandb.Image(
-                        val_batch['image'][d],
-                        caption='''
-                            Pred/Truth
-                            일상성 : {} / {}, 
-                            성 : {} / {}, 
-                            장식성 : {} / {}
-                        '''.format(
-                            daily_list[preds[0][d].item()],
-                            daily_list[val_batch["daily_label"][d]], 
-                            gender_list[preds[1][d].item()],
-                            gender_list[val_batch["gender_label"][d]], 
-                            embellishment_list[preds[2][d].item()],
-                            embellishment_list[val_batch["embel_label"][d]]
+                    try:
+                        val_images.append(
+                            wandb.Image(
+                            val_batch['image'][d],
+                            caption='''
+                                Pred/Truth
+                                일상성 : {} / {}, 
+                                성 : {} / {}, 
+                                장식성 : {} / {}
+                            '''.format(
+                                daily_list[preds[0][d].item()],
+                                daily_list[val_batch["daily_label"][d]], 
+                                gender_list[preds[1][d].item()],
+                                gender_list[val_batch["gender_label"][d]], 
+                                embellishment_list[preds[2][d].item()],
+                                embellishment_list[val_batch["embel_label"][d]]
+                                )
                             )
                         )
-                    )
+                    except:
+                        if model_target == "Daily":
+                            val_images.append(
+                                wandb.Image(
+                                    val_batch["image"][d],
+                                    caption='''
+                                        Pred/Truth
+                                        일상성 : {} / {}
+                                    '''.format(
+                                        daily_list[preds[d].item()],
+                                        daily_list[val_batch["daily_label"][d]]
+                                    )
+                                )
+                            )
+                        elif model_target == "Gender":
+                            val_images.append(
+                                wandb.Image(
+                                    val_batch["image"][d],
+                                    caption='''
+                                        Pred/Truth
+                                        성 : {} / {}
+                                    '''.format(
+                                        gender_list[preds[d].item()],
+                                        gender_list[val_batch["gender_label"][d]]
+                                    )
+                                )
+                            )
+                        elif model_target == "Embellishment":
+                            val_images.append(
+                                wandb.Image(
+                                    val_batch["image"][d],
+                                    caption='''
+                                        Pred/Truth
+                                        장식성 : {} / {}
+                                    '''.format(
+                                        embellishment_list[preds[d].item()],
+                                        embellishment_list[val_batch["embel_label"][d]]
+                                    )
+                                )
+                            )
 
-            val_loss = [np.sum(list(val_loss_items.values())[i])/len(val_dataloader) for i in range(3)]
-            print(
-                "Validation process "
-                "Epoch [{}/{}], Loss: {:.4f}, "
-                "Loss_daily: {:.4f}, Loss_gender: {:.4f}, Loss_embel: {:.4f}, Time : {:2.3f}".format(
-                    epoch + 1,
-                    a.epochs,
-                    np.sum(val_loss),
-                    val_loss[0],
-                    val_loss[1],
-                    val_loss[2],
-                    time.time() - t0,
+            if model_target is None:
+                val_loss = [np.sum(list(val_loss_items.values())[i])/len(val_dataloader) for i in range(3)]
+                print(
+                    "Validation process "
+                    "Epoch [{}/{}], Loss: {:.4f}, "
+                    "Loss_daily: {:.4f}, Loss_gender: {:.4f}, Loss_embel: {:.4f}, Time : {:2.3f}".format(
+                        epoch + 1,
+                        a.epochs,
+                        np.sum(val_loss),
+                        val_loss[0],
+                        val_loss[1],
+                        val_loss[2],
+                        time.time() - t0,
+                    )
                 )
-            )
-            t0 = time.time()
-            # wandb
-            wandb.log(
-                {
-                    "Examples": val_images,
-                    "val_loss": np.sum(val_loss),
-                    "val_loss_daily": val_loss[0],
-                    "val_loss_gender": val_loss[1],
-                    "val_loss_embel": val_loss[2],
-                }
-            )
+                t0 = time.time()
+
+                # wandb
+                wandb.log(
+                    {
+                        "Examples": val_images,
+                        "val_loss": np.sum(val_loss),
+                        "val_loss_daily": val_loss[0],
+                        "val_loss_gender": val_loss[1],
+                        "val_loss_embel": val_loss[2],
+                    }
+                )
+            else:
+                val_loss = np.sum(val_loss_items)/len(val_dataloader)
+                print(
+                    "Validation process "
+                    "Epoch [{}/{}], Loss: {:.4f}, Time : {:2.3f}".format(
+                        epoch + 1,
+                        a.epochs,
+                        val_loss,
+                        time.time() - t0,
+                    )
+                )
+                t0 = time.time()
+
+                # wandb
+                wandb.log(
+                    {
+                        "Examples": val_images,
+                        "val_loss": val_loss,
+                    }
+                )
         
         if (epoch + 1) % 10 == 0:
             a.lr *= 0.9
@@ -369,23 +480,42 @@ def main():
             print(f"learning rate is decayed... learning rate is {a.lr}")
 
             # 재학습을 위해 10에포크마다 모델 저장
-            torch.save(
-                {
-                    "epoch": epoch + 1,
-                    "model_state_dict": net.state_dict(),
-                    "optimizer_state_dict": optimizer.state_dict(),
-                    "loss": loss,
-                    "lr": a.lr,
-                },
-                save_path + "/model_resume_" + str(epoch + 1) + ".pth",
-            )
+            if model_target is None:
+                torch.save(
+                    {
+                        "epoch": epoch + 1,
+                        "model_state_dict": net.state_dict(),
+                        "optimizer_state_dict": optimizer.state_dict(),
+                        "loss": loss,
+                        "lr": a.lr,
+                    },
+                    save_path + "/model_resume_" + str(epoch + 1) + ".pth",
+                )
+            else:
+                torch.save(
+                    {
+                        "epoch": epoch + 1,
+                        "model_state_dict": net.state_dict(),
+                        "optimizer_state_dict": optimizer.state_dict(),
+                        "loss": loss,
+                        "lr": a.lr,
+                    },
+                    save_path + f"/{model_target}_model_resume_" + str(epoch + 1) + ".pth",
+                )
 
         if (epoch + 1) % 20 == 0:
-            print("Saving Model....")
-            torch.save(
-                net.state_dict(), save_path + "/model_" + str(epoch + 1) + ".pkl"
-            )
-            print("OK.")
+            if model_target is not None:
+                print("Saving Model....")
+                torch.save(
+                    net.state_dict(), save_path + "/model_" + str(epoch + 1) + ".pkl"
+                )
+                print("OK.")
+            else:
+                print("Saving Model....")
+                torch.save(
+                    net.state_dict(), save_path + f"/{model_target}_model_" + str(epoch + 1) + ".pkl"
+                )
+                print("OK.")
 
         print(
             "Epoch {} is finished. Total Time : {:2.3f} \n".format(
@@ -395,4 +525,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    for target in ["Daily", "Gender", "Embellishment"]:
+        main(model_target=target)

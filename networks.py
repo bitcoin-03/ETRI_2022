@@ -134,8 +134,9 @@ class Baseline_ResNet_emo(nn.Module):
 
 
 class EfficientNet_emo(nn.Module):
-    def __init__(self):
+    def __init__(self, target: str=None):
         super(EfficientNet_emo, self).__init__()
+        self.target = target
         model = EfficientNet.from_pretrained("efficientnet-b1")
         tmp = list(model.children())[:-4]
         self.enc = nn.Sequential(tmp[0], tmp[1], *tmp[2], *tmp[3:])
@@ -148,19 +149,42 @@ class EfficientNet_emo(nn.Module):
             nn.BatchNorm1d(512),
             nn.Dropout(),
         )
-        self.daily_linear = nn.Linear(512, 7)
-        self.gender_linear = nn.Linear(512, 6)
-        self.embel_linear = nn.Linear(512, 3)
+        
+        if self.target == "Daily":
+            self.daily_linear = nn.Linear(512, 7)
+        elif self.target == "Gender":
+            self.gender_linear = nn.Linear(512, 6)
+        elif self.target == "Embellishment":
+            self.embel_linear = nn.Linear(512, 3)
+        elif self.target == None:
+            self.daily_linear = nn.Linear(512, 7)
+            self.gender_linear = nn.Linear(512, 6)
+            self.embel_linear = nn.Linear(512, 3)
+        else:
+            raise ValueError(f"Invalid model target [{self.target}] is assigned")
 
     def forward(self, x):
         x = self.enc(x["image"])
         x = self.head(x)
 
-        out_daily = self.daily_linear(x)
-        out_gender = self.gender_linear(x)
-        out_embel = self.embel_linear(x)
+        if self.target == "Daily":
+            out_daily = self.daily_linear(x)
+            
+            return out_daily
+        elif self.target == "Gender":
+            out_gender = self.gender_linear(x)
+            
+            return out_gender
+        elif self.target == "Embellishment":
+            out_embel = self.embel_linear(x)
+        
+            return out_embel
+        elif self.target == None:
+            out_daily = self.daily_linear(x)
+            out_gender = self.gender_linear(x)
+            out_embel = self.embel_linear(x)
 
-        return out_daily, out_gender, out_embel
+            return out_daily, out_gender, out_embel
 
 
 if __name__ == "__main__":
