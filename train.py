@@ -315,7 +315,7 @@ def main():
                     criterion(val_out_embel, val_batch["embel_label"]).item()
                 )
 
-                d = random.randint(0, len(val_batch) - 1)
+                d = random.randint(0, len(val_batch))
                 daily_list = ["실내복", "가벼운 외출", "오피스룩", "격식차린", "이벤트", "교복", "운동복"]
                 gender_list = ["밀리터리", "매니쉬", "유니섹스", "걸리쉬", "우아한", "섹시한"]
                 embellishment_list = ["장식이 없는", "포인트 장식이 있는", "장식이 많은"]
