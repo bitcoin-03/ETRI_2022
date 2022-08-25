@@ -28,6 +28,7 @@ Update: 2022.04.20.
 """
 import torch.nn as nn
 import torchvision.models as models
+import torch
 
 ### 라이브러리 설치 ####
 import subprocess

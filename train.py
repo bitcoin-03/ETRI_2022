@@ -40,7 +40,7 @@ from albumentations.pytorch import ToTensorV2
 
 ##########################
 
-from dataset import ETRIDataset_emo
+from dataset import ETRIDataset_emo, ETRIDataset_normalize
 from networks import *
 
 import pandas as pd
@@ -119,7 +119,7 @@ def get_transforms(need=("train", "val")):
         transformations["train"] = Compose(
             [
                 # HorizontalFlip(p=0.5),
-                # ShiftScaleRotate(p=0.5),
+                # # ShiftScaleRotate(p=0.5),
                 # HueSaturationValue(
                 #     hue_shift_limit=0.2,
                 #     sat_shift_limit=0.2,
@@ -132,12 +132,15 @@ def get_transforms(need=("train", "val")):
                 # ColorJitter(p=0.5),
                 # CLAHE(),
                 Normalize(),
+                # ToTensorV2(p=1.0),
             ],
             p=1.0,
         )
     if "val" in need:
         transformations["val"] = Compose(
-            [],
+            [
+                # ToTensorV2(p=1.0),
+            ],
             p=1.0,
         )
     return transformations
@@ -161,6 +164,8 @@ def main():
         net = Baseline_ResNet_emo.to(DEVICE)
     elif a.model == "EfficientNet_emo":
         net = EfficientNet_emo().to(DEVICE)
+    elif a.model == "EfficientNetV2_emo":
+        net = EfficientNetV2_emo().to(DEVICE)
 
     print("Loading data....")
     # 경로는 각자 맞춰주시면 될것같습니다.
@@ -168,7 +173,7 @@ def main():
     df = pd.read_csv(
         "../TEAM비뜨코인/ETRI_Season3/task1_data/info_etri20_emotion_tr_val_simple.csv"
     )
-    train_dataset = ETRIDataset_emo(
+    train_dataset = ETRIDataset_normalize(
         df,
         base_path="../TEAM비뜨코인/ETRI_Season3/task1_data/train/",
         transform=aug["train"],
@@ -182,7 +187,7 @@ def main():
         pin_memory=True,
     )
 
-    val_dataset = ETRIDataset_emo(
+    val_dataset = ETRIDataset_normalize(
         df,
         base_path="../TEAM비뜨코인/ETRI_Season3/task1_data/train/",
         type="val",
