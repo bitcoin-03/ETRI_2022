@@ -57,10 +57,16 @@ import numpy as np
 from pathlib import Path
 import glob, re
 
+from loss import loss_save
+from sklearn.metrics import top_k_accuracy_score
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--model", type=str, default="Baseline_ResNet_emo")
-parser.add_argument("--version", type=str, default="Baseline_ResNet_emo")
+parser.add_argument(
+    "--model", type=str, default="Baseline_ResNet_emo"
+)
+parser.add_argument(
+    "--version", type=str, default="Baseline_ResNet_emo"
+)
 parser.add_argument(
     "--epochs", default=100, type=int, metavar="N", help="number of total epochs to run"
 )
@@ -81,14 +87,21 @@ parser.add_argument(
     "--seed", default=None, type=int, help="seed for initializing training. "
 )
 # models 안에 저장되는 이름과 wandb 실험 앞에 붙는 이름입니다.
-parser.add_argument("--name", default="exp", help="model save at {exp_num}_모델이름")
+parser.add_argument(
+    "--name", default="exp", help="model save at {exp_num}_모델이름"
+)
 # 실험에 대한 설명입니다.(실험 구분 목적) wandb에 exp_모델이름 뒤에 붙습니다.
 parser.add_argument(
     "--explan", default="", help="experiment description, ex. exp_efficientnet_{explan}"
 )
 # 10에폭마다 체크포인트를 저장하게 구현하였고, 만약 20에폭까지 학습됐고, 이어서 학습하고 싶으시면
 # model_resume_20.pth를 쓰시면 됩니다. 그럼 21에폭부터 학습이 이어집니다.
-parser.add_argument("--resume_from", type=str, default=None, help="model_resume_20.pth")
+parser.add_argument(
+    "--resume_from", type=str, default=None, help="model_resume_20.pth"
+)
+parser.add_argument(
+    "--criterion", type=str, default="cross_entropy", help="criterion type (default: cross_entropy)"
+)
 
 
 a = parser.parse_args()
@@ -216,7 +229,9 @@ def main():
         optimizer = torch.optim.Adam(net.parameters(), lr=a.lr)
 
     # optimizer = torch.optim.Adam(net.parameters(), lr=a.lr)
-    criterion = nn.CrossEntropyLoss().to(DEVICE)
+    # criterion = nn.CrossEntropyLoss().to(DEVICE)
+    criterion = loss_save(a.criterion, train_dataset)
+    val_criterion = loss_save(a.criterion, val_dataset)
 
     total_step = len(train_dataloader)
     val_total_step = len(val_dataloader)
@@ -239,12 +254,17 @@ def main():
     )
     wandb.save()
     wandb.watch(net)
+    
     print("Preparing Train....")
     for epoch in range(resume_epoch, a.epochs):
         # Train loop
         net.train()
         t1 = time.time()
-
+        train_acc = {
+            'daily' : 0,
+            'gender' : 0,
+            'embel' : 0,
+        }
         for i, sample in enumerate(train_dataloader):
             optimizer.zero_grad()
             step += 1
@@ -253,10 +273,27 @@ def main():
 
             out_daily, out_gender, out_embel = net(sample)
 
-            loss_daily = criterion(out_daily, sample["daily_label"])
-            loss_gender = criterion(out_gender, sample["gender_label"])
-            loss_embel = criterion(out_embel, sample["embel_label"])
+            loss_daily = criterion['daily'](out_daily, sample['daily_label'])
+            loss_gender = criterion['gender'](out_gender, sample['gender_label'])
+            loss_embel = criterion['embel'](out_embel, sample['embel_label'])
             loss = loss_daily + loss_gender + loss_embel
+
+            # top1 accuracy
+            train_acc['daily'] += top_k_accuracy_score(
+                sample['daily_label'].detach().cpu().numpy(),
+                out_daily.detach().cpu().numpy(), k=1,
+                labels=[i for i in range(7)]
+            )
+            train_acc['gender'] += top_k_accuracy_score(
+                sample['gender_label'].detach().cpu().numpy(),
+                out_gender.detach().cpu().numpy(), k=1,
+                labels=[i for i in range(6)]
+            )
+            train_acc['embel'] += top_k_accuracy_score(
+                sample['embel_label'].detach().cpu().numpy(),
+                out_embel.detach().cpu().numpy(),k=1,
+                labels=[i for i in range(3)]
+            )
 
             loss.backward()
             optimizer.step()
@@ -288,11 +325,24 @@ def main():
                     "loss_embel": loss_embel.item(),
                 }
             )
+        train_acc['daily'] /= len(train_dataloader)
+        train_acc['gender'] /= len(train_dataloader)
+        train_acc['embel'] /= len(train_dataloader)
+        wandb.log(
+            {
+                "train_acc": (train_acc['daily'] + train_acc['gender'] + train_acc['embel'])/3,
+            }
+        )
         val_images = []
         val_loss_items = {
             "daily_val_loss": [],
             "gender_val_loss": [],
             "embel_val_loss": [],
+        }
+        val_acc = {
+            'daily' : 0,
+            'gender' : 0,
+            'embel' : 0,
         }
         # Validation loop
         with torch.no_grad():
@@ -310,22 +360,38 @@ def main():
                     torch.argmax(val_out_gender, dim=-1),
                     torch.argmax(val_out_embel, dim=-1),
                 )
-                val_loss_items["daily_val_loss"].append(
-                    criterion(val_out_daily, val_batch["daily_label"]).item()
-                )
-                val_loss_items["gender_val_loss"].append(
-                    criterion(val_out_gender, val_batch["gender_label"]).item()
-                )
-                val_loss_items["embel_val_loss"].append(
-                    criterion(val_out_embel, val_batch["embel_label"]).item()
-                )
+                val_loss_items['daily_val_loss'].append(
+                    val_criterion['daily'](val_out_daily, val_batch["daily_label"]).item()
+                    )
+                val_loss_items['gender_val_loss'].append(
+                    val_criterion['gender'](val_out_gender, val_batch["gender_label"]).item()
+                    )
+                val_loss_items['embel_val_loss'].append(
+                    val_criterion['embel'](val_out_embel, val_batch["embel_label"]).item()
+                    )
 
                 d = random.randint(0, len(val_batch))
                 daily_list = ["실내복", "가벼운 외출", "오피스룩", "격식차린", "이벤트", "교복", "운동복"]
                 gender_list = ["밀리터리", "매니쉬", "유니섹스", "걸리쉬", "우아한", "섹시한"]
                 embellishment_list = ["장식이 없는", "포인트 장식이 있는", "장식이 많은"]
+                
+                val_acc['daily'] += top_k_accuracy_score(
+                    val_batch["daily_label"].detach().cpu().numpy(),
+                    val_out_daily.detach().cpu().numpy(), k=1,
+                    labels=[i for i in range(7)]
+                )
+                val_acc['gender'] += top_k_accuracy_score(
+                    val_batch["gender_label"].detach().cpu().numpy(),
+                    val_out_gender.detach().cpu().numpy(), k=1,
+                    labels=[i for i in range(6)]
+                )
+                val_acc['embel'] += top_k_accuracy_score(
+                    val_batch["embel_label"].detach().cpu().numpy(),
+                    val_out_embel.detach().cpu().numpy(),k=1,
+                    labels=[i for i in range(3)]
+                )
 
-                if len(val_images) <= 108:
+                if len(val_images) < 108:
                     val_images.append(
                         wandb.Image(
                             val_batch["image"][d],
@@ -349,10 +415,14 @@ def main():
                 np.sum(list(val_loss_items.values())[i]) / len(val_dataloader)
                 for i in range(3)
             ]
+            val_acc['daily'] /= len(val_dataloader)
+            val_acc['gender'] /= len(val_dataloader)
+            val_acc['embel'] /= len(val_dataloader)
             print(
                 "Validation process "
                 "Epoch [{}/{}], Loss: {:.4f}, "
-                "Loss_daily: {:.4f}, Loss_gender: {:.4f}, Loss_embel: {:.4f}, Time : {:2.3f}".format(
+                "Loss_daily: {:.4f}, Loss_gender: {:.4f}, Loss_embel: {:.4f}, Time : {:2.3f}, valid_acc: {:.4f}"
+                .format(
                     epoch + 1,
                     a.epochs,
                     np.sum(val_loss),
@@ -360,6 +430,7 @@ def main():
                     val_loss[1],
                     val_loss[2],
                     time.time() - t0,
+                    (val_acc['daily'] + val_acc['gender'] + val_acc['embel'])/3,
                 )
             )
             t0 = time.time()
@@ -371,6 +442,7 @@ def main():
                     "val_loss_daily": val_loss[0],
                     "val_loss_gender": val_loss[1],
                     "val_loss_embel": val_loss[2],
+                    "val_acc" : (val_acc['daily'] + val_acc['gender'] + val_acc['embel'])/3,
                 }
             )
 
