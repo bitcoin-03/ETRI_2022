@@ -113,6 +113,59 @@ class ETRIDataset_emo(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.df[self.df.Split == self.type])
 
+class ETRIDataset_normalize(torch.utils.data.Dataset):
+    """Dataset containing emotion categories (Daily, Gender, Embellishment)."""
+
+    def __init__(self, df, base_path, type: str = "train", transform=None):
+        self.df = df
+        self.base_path = base_path
+        self.type = type
+        if self.type not in ["train", "val"]:
+            raise KeyError(f"Type [{self.type}] is an invalid type")
+        self.bbox_crop = BBoxCrop()
+        self.background = BackGround(224)
+        self.to_tensor = ToTensorV2()
+        self.transform = transform
+
+    def __getitem__(self, i):
+        sample = self.df[self.df.Split == self.type].iloc[i]
+        image = cv2.imread(self.base_path + sample["image_name"])
+        if image.shape[2] != 3:
+            image = cv2.cvtColor(image, cv2.COLOR_BGRA2RGB)
+        else:
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        daily_label = sample["Daily"]
+        gender_label = sample["Gender"]
+        embel_label = sample["Embellishment"]
+        bbox_xmin = sample["BBox_xmin"]
+        bbox_ymin = sample["BBox_ymin"]
+        bbox_xmax = sample["BBox_xmax"]
+        bbox_ymax = sample["BBox_ymax"]
+
+        image = self.bbox_crop(image, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax)
+        image = image.astype(np.uint8)
+
+        if self.transform:
+            image = self.transform(image=image)["image"]
+            image = self.background(image, None)
+            image = self.to_tensor(image=image)["image"]
+            image = image.type(torch.float32)
+        else:
+            image = self.background(image, None)
+            image = self.to_tensor(image=image)["image"]
+            image = image.type(torch.float32)
+
+        ret = {}
+        ret["image"] = image
+        ret["daily_label"] = daily_label
+        ret["gender_label"] = gender_label
+        ret["embel_label"] = embel_label
+
+        return ret
+
+    def __len__(self):
+        return len(self.df[self.df.Split == self.type])
+
 
 # class ETRIDataset_emo(torch.utils.data.Dataset):
 #     """ Dataset containing emotion categories (Daily, Gender, Embellishment). """
