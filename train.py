@@ -31,11 +31,11 @@ import subprocess
 import sys
 
 try:
-    from albumentations import *
+    import albumentations as A
 except ImportError:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "albumentations"])
 finally:
-    from albumentations import *
+    import albumentations as A
 from albumentations.pytorch import ToTensorV2
 
 ##########################
@@ -45,7 +45,6 @@ from networks import *
 
 import pandas as pd
 import os
-import argparse
 import time
 
 import torch
@@ -60,163 +59,136 @@ import glob, re
 from loss import loss_save
 from sklearn.metrics import top_k_accuracy_score
 
-parser = argparse.ArgumentParser()
-parser.add_argument(
-    "--model", type=str, default="Baseline_ResNet_emo"
-)
-parser.add_argument(
-    "--version", type=str, default="Baseline_ResNet_emo"
-)
-parser.add_argument(
-    "--epochs", default=100, type=int, metavar="N", help="number of total epochs to run"
-)
-parser.add_argument(
-    "--lr", default=0.0001, type=float, metavar="N", help="learning rate"
-)
-parser.add_argument(
-    "-b",
-    "--batch-size",
-    default=128,
-    type=int,
-    metavar="N",
-    help="mini-batch size (default: 256), this is the total "
-    "batch size of all GPUs on the current node when "
-    "using Data Parallel or Distributed Data Parallel",
-)
-parser.add_argument(
-    "--seed", default=None, type=int, help="seed for initializing training. "
-)
-# models 안에 저장되는 이름과 wandb 실험 앞에 붙는 이름입니다.
-parser.add_argument(
-    "--name", default="exp", help="model save at {exp_num}_모델이름"
-)
-# 실험에 대한 설명입니다.(실험 구분 목적) wandb에 exp_모델이름 뒤에 붙습니다.
-parser.add_argument(
-    "--explan", default="", help="experiment description, ex. exp_efficientnet_{explan}"
-)
-# 10에폭마다 체크포인트를 저장하게 구현하였고, 만약 20에폭까지 학습됐고, 이어서 학습하고 싶으시면
-# model_resume_20.pth를 쓰시면 됩니다. 그럼 21에폭부터 학습이 이어집니다.
-parser.add_argument(
-    "--resume_from", type=str, default=None, help="model_resume_20.pth"
-)
-parser.add_argument(
-    "--criterion", type=str, default="cross_entropy", help="criterion type (default: cross_entropy)"
-)
+class Config:
+    model = "EfficientNet_emo"
+    epochs =  100
+    lr = 0.0001
+    batch_size = 256
+    seed = 42
+    num_workers = 2
+    image_size = 224
+    criterion = "focal"
 
+    name = "[effb0]" # model save at {exp_num}_모델이름"
+    explan =  "focaltest" # experiment description, ex. exp_efficientnet_{explan}
+    resume_from =  ""  # ex) model_resume_20.pth
 
-a = parser.parse_args()
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(DEVICE)
+    csv_path = "/content/drive/MyDrive/Fashion-How/data/task1_data/info_etri20_emotion_tr_val_simple.csv"
+    data_path = "/content/drive/MyDrive/Fashion-How/data/task1_data/train/"
 
+def to_dict(config):
+    return {
+        'model' : config.model,
+        'epochs' : config.epochs,
+        'lr' : config.lr,
+        'batch_size' : config.batch_size,
+        'seed' : config.seed,
+        'num_workers' : config.num_workers,
+        'image_size' : config.image_size,
+        'criterion' : config.criterion,
 
-def increment_path(path, exist_ok=False):
-    """Automatically increment path, i.e. runs/exp --> runs/exp0, runs/exp1 etc.
-    Args:
-        path (str or pathlib.Path): f"{model_dir}/{args.name}".
-        exist_ok (bool): whether increment path (increment if False).
-    """
-    path = Path(path)
-    if (path.exists() and exist_ok) or (not path.exists()):
-        return f"{path}"
-    else:
-        dirs = glob.glob(f"{path}*")
-        matches = [re.search(rf"%s(\d+)" % path.stem, d) for d in dirs]
-        i = [int(m.groups()[0]) for m in matches if m]
-        n = max(i) + 1 if i else 2
-        return f"{path}{n}"
+        'name' : config.name,
+        'explan' : config.explan,
+        'resume_from' : config.resume_from,
 
+        'csv_path' : config.csv_path,
+        'data_path' : config.data_path,
+    }
+    
 
 def get_transforms(need=("train", "val")):
     transformations = {}
     if "train" in need:
-        transformations["train"] = Compose(
+        transformations["train"] = A.Compose(
             [
-                # HorizontalFlip(p=0.5),
-                # # ShiftScaleRotate(p=0.5),
-                # HueSaturationValue(
+                A.HorizontalFlip(p=0.5),
+
+                # A.HueSaturationValue(
                 #     hue_shift_limit=0.2,
                 #     sat_shift_limit=0.2,
                 #     val_shift_limit=0.2,
                 #     p=0.5,
                 # ),
-                # RandomBrightnessContrast(
+                # A.RandomBrightnessContrast(
                 #     brightness_limit=(-0.1, 0.1), contrast_limit=(-0.1, 0.1), p=0.5
                 # ),
-                # ColorJitter(p=0.5),
-                # CLAHE(),
-                Normalize(),
-                # ToTensorV2(p=1.0),
+                # A.ColorJitter(p=0.5),
             ],
             p=1.0,
         )
     if "val" in need:
-        transformations["val"] = Compose(
-            [
-                # ToTensorV2(p=1.0),
-            ],
-            p=1.0,
-        )
+        # transformations["val"] = Compose(
+        #     [
+        #         ToTensorV2(p=1.0),
+        #     ],
+        #     p=1.0,
+        # )
+        transformations["val"] = None
     return transformations
 
 
 def main():
+    DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print("현재 DEVICE : ",DEVICE)
+
+    set_seeds(Config.seed)
+
     """The main function for model training."""
     if os.path.exists("models") is False:
         os.makedirs("models")
 
-    # save_path = "models/" + a.version
-    # models 폴더에 exp, exp1, ....expN 으로 저장됩니다.
-    save_path = increment_path(os.path.join("models/", a.name))
+    save_path = increment_path(os.path.join("models/", Config.name))
     if os.path.exists(save_path) is False:
         os.makedirs(save_path)
 
     # 모델은 parser로 network.py에 구현되어 있는 클래스 이름을 입력받아서 생성되게끔 했습니다.
     print("Loading model...")
-    # net = EfficientNet_emo().to(DEVICE)
-    if a.model == "Baseline_ResNet_emo":
+    if Config.model == "Baseline_ResNet_emo":
         net = Baseline_ResNet_emo.to(DEVICE)
-    elif a.model == "EfficientNet_emo":
+    elif Config.model == "EfficientNet_emo":
         net = EfficientNet_emo().to(DEVICE)
     elif a.model == "EfficientNetV2_emo":
         net = EfficientNetV2_emo().to(DEVICE)
-
     print("Loading data....")
-    # 경로는 각자 맞춰주시면 될것같습니다.
+
     aug = get_transforms()
-    df = pd.read_csv(
-        "../TEAM비뜨코인/ETRI_Season3/task1_data/info_etri20_emotion_tr_val_simple.csv"
-    )
-    train_dataset = ETRIDataset_normalize(
+    df = pd.read_csv(Config.csv_path)
+
+    train_dataset = ETRIDataset_emo(
         df,
-        base_path="../TEAM비뜨코인/ETRI_Season3/task1_data/train/",
+        base_path=Config.data_path,
+        image_size=Config.image_size,
+        type="train",
         transform=aug["train"],
     )
 
     train_dataloader = torch.utils.data.DataLoader(
         train_dataset,
-        batch_size=a.batch_size,
+        batch_size=Config.batch_size,
         shuffle=True,
-        num_workers=torch.cuda.device_count() * 4,
+        num_workers=Config.num_workers,
         pin_memory=True,
     )
 
-    val_dataset = ETRIDataset_normalize(
+    val_dataset = ETRIDataset_emo(
         df,
-        base_path="../TEAM비뜨코인/ETRI_Season3/task1_data/train/",
+        base_path=Config.data_path,
+        image_size=Config.image_size,
         type="val",
         transform=aug["val"],
     )
+
     val_dataloader = torch.utils.data.DataLoader(
         val_dataset,
-        batch_size=a.batch_size,
+        batch_size=Config.batch_size,
         shuffle=True,
-        num_workers=torch.cuda.device_count() * 4,
+        num_workers=Config.num_workers,
         pin_memory=True,
     )
 
-    if a.resume_from:
+    if Config.resume_from:
         # 저장했던 중간 모델 정보를 읽습니다.
-        path = "models/" + a.resume_from
+        path = "models/" + Config.resume_from
         checkpoint = torch.load(path)
         net.load_state_dict(checkpoint["model_state_dict"])
 
@@ -226,37 +198,35 @@ def main():
         loss = checkpoint["loss"]
     else:
         resume_epoch = 0
-        optimizer = torch.optim.Adam(net.parameters(), lr=a.lr)
+        optimizer = torch.optim.Adam(net.parameters(), lr=Config.lr)
 
-    # optimizer = torch.optim.Adam(net.parameters(), lr=a.lr)
     # criterion = nn.CrossEntropyLoss().to(DEVICE)
-    criterion = loss_save(a.criterion, train_dataset)
-    val_criterion = loss_save(a.criterion, val_dataset)
+    criterion = loss_save(Config.criterion, train_dataset)
+    val_criterion = loss_save(Config.criterion, val_dataset)
 
-    total_step = len(train_dataloader)
+    train_total_step = len(train_dataloader)
     val_total_step = len(val_dataloader)
     step = 0
     val_step = 0
     t0 = time.time()
 
-    # wandb
-    """
-    project = "본인 프로젝트 이름", 
-    name="실험 이름, default=exp_모델명"
-    """
     increment_name = save_path.split("/")[-1]
-    model_explan = f"{'_'+a.explan if a.explan else ''}"
+    model_explan = f"{'_'+Config.explan if Config.explan else ''}"
+    config_dict = {**to_dict(Config), **aug}
     wandb.init(
         project="model-test",
-        name=f"{increment_name}_{a.model}{model_explan}",
+        name=f"{increment_name}_{Config.model}{model_explan}",
         entity="bitcoin-etri",
-        config=a,
+        config=config_dict,
     )
     wandb.save()
     wandb.watch(net)
-    
+
+
+    """ define loss scaler for automatic mixed precision """
+    # Creates a GradScaler once at the beginning of training.
     print("Preparing Train....")
-    for epoch in range(resume_epoch, a.epochs):
+    for epoch in range(resume_epoch, Config.epochs):
         # Train loop
         net.train()
         t1 = time.time()
@@ -265,38 +235,52 @@ def main():
             'gender' : 0,
             'embel' : 0,
         }
+
+        scaler = torch.cuda.amp.GradScaler()
+
         for i, sample in enumerate(train_dataloader):
             optimizer.zero_grad()
-            step += 1
-            for key in sample:
-                sample[key] = sample[key].to(DEVICE)
 
-            out_daily, out_gender, out_embel = net(sample)
+            with torch.cuda.amp.autocast():
+                # Casts operations to mixed precision 
+                step += 1
+                for key in sample:
+                    sample[key] = sample[key].to(DEVICE)
 
-            loss_daily = criterion['daily'](out_daily, sample['daily_label'])
-            loss_gender = criterion['gender'](out_gender, sample['gender_label'])
-            loss_embel = criterion['embel'](out_embel, sample['embel_label'])
-            loss = loss_daily + loss_gender + loss_embel
+                out_daily, out_gender, out_embel = net(sample)
+
+                loss_daily = criterion['daily'](out_daily, sample['daily_label'])
+                loss_gender = criterion['gender'](out_gender, sample['gender_label'])
+                loss_embel = criterion['embel'](out_embel, sample['embel_label'])
+                loss = loss_daily + loss_gender + loss_embel
 
             # top1 accuracy
-            train_acc['daily'] += top_k_accuracy_score(
-                sample['daily_label'].detach().cpu().numpy(),
-                out_daily.detach().cpu().numpy(), k=1,
-                labels=[i for i in range(7)]
-            )
-            train_acc['gender'] += top_k_accuracy_score(
-                sample['gender_label'].detach().cpu().numpy(),
-                out_gender.detach().cpu().numpy(), k=1,
-                labels=[i for i in range(6)]
-            )
-            train_acc['embel'] += top_k_accuracy_score(
-                sample['embel_label'].detach().cpu().numpy(),
-                out_embel.detach().cpu().numpy(),k=1,
-                labels=[i for i in range(3)]
-            )
+                train_acc['daily'] += top_k_accuracy_score(
+                    sample['daily_label'].detach().cpu().numpy(),
+                    out_daily.detach().cpu().numpy(), k=1,
+                    labels=[i for i in range(7)]
+                )
+                train_acc['gender'] += top_k_accuracy_score(
+                    sample['gender_label'].detach().cpu().numpy(),
+                    out_gender.detach().cpu().numpy(), k=1,
+                    labels=[i for i in range(6)]
+                )
+                train_acc['embel'] += top_k_accuracy_score(
+                    sample['embel_label'].detach().cpu().numpy(),
+                    out_embel.detach().cpu().numpy(),k=1,
+                    labels=[i for i in range(3)]
+                )
 
-            loss.backward()
-            optimizer.step()
+            # Scales the loss, and calls backward() 
+            # to create scaled gradients 
+            scaler.scale(loss).backward()
+
+            # Unscales gradients and calls 
+            # or skips optimizer.step() 
+            scaler.step(optimizer)
+
+            # Updates the scale for next iteration 
+            scaler.update()
 
             if (i + 1) % 10 == 0:
                 print(
@@ -304,9 +288,9 @@ def main():
                     "Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}, "
                     "Loss_daily: {:.4f}, Loss_gender: {:.4f}, Loss_embel: {:.4f}, Time : {:2.3f}".format(
                         epoch + 1,
-                        a.epochs,
+                        Config.epochs,
                         i + 1,
-                        total_step,
+                        train_total_step,
                         loss.item(),
                         loss_daily.item(),
                         loss_gender.item(),
@@ -402,9 +386,9 @@ def main():
                             장식성 : {} / {}
                         """.format(
                                 daily_list[preds[0][d].item()],
-                                daily_list[val_batch["daily_label"][d]],
+                                daily_list[val_batch["daily_label"][d]], 
                                 gender_list[preds[1][d].item()],
-                                gender_list[val_batch["gender_label"][d]],
+                                gender_list[val_batch["gender_label"][d]], 
                                 embellishment_list[preds[2][d].item()],
                                 embellishment_list[val_batch["embel_label"][d]],
                             ),
@@ -424,7 +408,7 @@ def main():
                 "Loss_daily: {:.4f}, Loss_gender: {:.4f}, Loss_embel: {:.4f}, Time : {:2.3f}, valid_acc: {:.4f}"
                 .format(
                     epoch + 1,
-                    a.epochs,
+                    Config.epochs,
                     np.sum(val_loss),
                     val_loss[0],
                     val_loss[1],
@@ -445,11 +429,11 @@ def main():
                     "val_acc" : (val_acc['daily'] + val_acc['gender'] + val_acc['embel'])/3,
                 }
             )
-
+        
         if (epoch + 1) % 10 == 0:
-            a.lr *= 0.9
-            optimizer = torch.optim.Adam(net.parameters(), lr=a.lr)
-            print(f"learning rate is decayed... learning rate is {a.lr}")
+            Config.lr *= 0.9
+            optimizer = torch.optim.Adam(net.parameters(), lr=Config.lr)
+            print(f"learning rate is decayed... learning rate is {Config.lr}")
 
             # 재학습을 위해 10에포크마다 모델 저장
             torch.save(
@@ -458,7 +442,7 @@ def main():
                     "model_state_dict": net.state_dict(),
                     "optimizer_state_dict": optimizer.state_dict(),
                     "loss": loss,
-                    "lr": a.lr,
+                    "lr": Config.lr,
                 },
                 save_path + "/model_resume_" + str(epoch + 1) + ".pth",
             )
@@ -475,6 +459,31 @@ def main():
                 epoch + 1, time.time() - t1
             )
         )
+
+def increment_path(path, exist_ok=False):
+    """Automatically increment path, i.e. runs/exp --> runs/exp0, runs/exp1 etc.
+    Args:
+        path (str or pathlib.Path): f"{model_dir}/{args.name}".
+        exist_ok (bool): whether increment path (increment if False).
+    """
+    path = Path(path)
+    if (path.exists() and exist_ok) or (not path.exists()):
+        return f"{path}"
+    else:
+        dirs = glob.glob(f"{path}*")
+        matches = [re.search(rf"%s(\d+)" % path.stem, d) for d in dirs]
+        i = [int(m.groups()[0]) for m in matches if m]
+        n = max(i) + 1 if i else 2
+        return f"{path}{n}"
+
+def set_seeds(seed):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed) # if use multi-GPU
+    torch.backends.cudnn.deterministic = False
+    torch.backends.cudnn.benchmark = True
+    np.random.seed(seed)
+    random.seed(seed)
 
 
 if __name__ == "__main__":
