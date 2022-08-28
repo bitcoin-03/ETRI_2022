@@ -254,7 +254,7 @@ def main():
                 loss_embel = criterion['embel'](out_embel, sample['embel_label'])
                 loss = loss_daily + loss_gender + loss_embel
 
-            # top1 accuracy
+                # top1 accuracy
                 train_acc['daily'] += top_k_accuracy_score(
                     sample['daily_label'].detach().cpu().numpy(),
                     out_daily.detach().cpu().numpy(), k=1,
@@ -314,6 +314,9 @@ def main():
         train_acc['embel'] /= len(train_dataloader)
         wandb.log(
             {
+                "train_acc_daily": train_acc['daily'],
+                "train_acc_gender": train_acc['gender'],
+                "train_acc_embel": train_acc['embel'],
                 "train_acc": (train_acc['daily'] + train_acc['gender'] + train_acc['embel'])/3,
             }
         )
@@ -405,16 +408,20 @@ def main():
             print(
                 "Validation process "
                 "Epoch [{}/{}], Loss: {:.4f}, "
-                "Loss_daily: {:.4f}, Loss_gender: {:.4f}, Loss_embel: {:.4f}, Time : {:2.3f}, valid_acc: {:.4f}"
+                "Loss_daily: {:.4f}, Loss_gender: {:.4f}, Loss_embel: {:.4f}, "
+                "val_acc_daily: {:.4f}, val_acc_gender: {:.4f}, val_acc_embel: {:.4f}, valid_acc: {:.4f}, Time : {:2.3f}"
                 .format(
                     epoch + 1,
-                    Config.epochs,
+                    a.epochs,
                     np.sum(val_loss),
                     val_loss[0],
                     val_loss[1],
                     val_loss[2],
-                    time.time() - t0,
+                    val_acc['daily'],
+                    val_acc['gender'],
+                    val_acc['embel'],
                     (val_acc['daily'] + val_acc['gender'] + val_acc['embel'])/3,
+                    time.time() - t0,
                 )
             )
             t0 = time.time()
@@ -422,10 +429,13 @@ def main():
             wandb.log(
                 {
                     "Examples": val_images,
-                    "val_loss": np.sum(val_loss),
                     "val_loss_daily": val_loss[0],
                     "val_loss_gender": val_loss[1],
                     "val_loss_embel": val_loss[2],
+                    "val_loss": np.sum(val_loss),
+                    "val_acc_daily": val_acc['daily'],
+                    "val_acc_gender": val_acc['gender'],
+                    "val_acc_embel": val_acc['embel'],
                     "val_acc" : (val_acc['daily'] + val_acc['gender'] + val_acc['embel'])/3,
                 }
             )
