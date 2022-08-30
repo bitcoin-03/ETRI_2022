@@ -27,6 +27,7 @@ SOFTWARE.
 Update: 2022.04.20.
 """
 ### 라이브러리 설치 ####
+from operator import mod
 import subprocess
 import sys
 
@@ -153,7 +154,7 @@ def main(model_target=None):
 
     # save_path = "models/" + a.version
     # models 폴더에 exp, exp1, ....expN 으로 저장됩니다.
-    save_path = increment_path(os.path.join("models/", a.name))
+    save_path = increment_path(os.path.join("models/", a.name), exist_ok=True)
     if os.path.exists(save_path) is False:
         os.makedirs(save_path)
 
@@ -239,7 +240,10 @@ def main(model_target=None):
     )
     wandb.save()
     wandb.watch(net)
+
     print("Preparing Train....")
+    train_tot_loss = 0
+    val_tot_loss = 0
     for epoch in range(resume_epoch, a.epochs):
         # Train loop
         net.train()
@@ -271,42 +275,43 @@ def main(model_target=None):
             loss.backward()
             optimizer.step()
 
-            if (i + 1) % 10 == 0:
-                try:
-                    print(
-                        "Train process "
-                        "Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}, "
-                        "Loss_daily: {:.4f}, Loss_gender: {:.4f}, Loss_embel: {:.4f}, Time : {:2.3f}".format(
-                            epoch + 1,
-                            a.epochs,
-                            i + 1,
-                            total_step,
-                            loss.item(),
-                            loss_daily.item(),
-                            loss_gender.item(),
-                            loss_embel.item(),
-                            time.time() - t0,
-                        )
-                    )
-                except:
-                    print(
-                        "Train process "
-                        "Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}, ".format(
-                            epoch + 1,
-                            a.epochs,
-                            i + 1,
-                            total_step,
-                            loss.item(),
-                            time.time() - t0,
-                        )
-                    )
+            train_tot_loss += loss.item() # add loss by batch
 
-                t0 = time.time()
-            # wandb
+        train_tot_loss = train_tot_loss/total_step # divide loss by batch iteration size
+
+        # Logging by epoch
+        try:
+            print(
+                "Train process "
+                "Epoch [{}/{}], Loss: {:.4f}, "
+                "Loss_daily: {:.4f}, Loss_gender: {:.4f}, Loss_embel: {:.4f}, Time : {:2.3f}".format(
+                    epoch + 1,
+                    a.epochs,
+                    loss.item(),
+                    loss_daily.item(),
+                    loss_gender.item(),
+                    loss_embel.item(),
+                    time.time() - t0,
+                )
+            )
+        except:
+            print(
+                "Train process "
+                "Epoch [{}/{}], Loss: {:.4f}, ".format(
+                    epoch + 1,
+                    a.epochs,
+                    train_tot_loss,
+                    time.time() - t0,
+                )
+            )
+
+        t0 = time.time()
+        # wandb
+        if len(sample) != a.batch_size:
             try:
                 wandb.log(
                     {
-                        "loss": loss.item(),
+                        "loss": train_tot_loss,
                         "loss_daily": loss_daily.item(),
                         "loss_gender": loss_gender.item(),
                         "loss_embel": loss_embel.item(),
@@ -315,7 +320,7 @@ def main(model_target=None):
             except:
                 wandb.log(
                     {
-                        "loss": loss.item(),
+                        f"loss_{model_target}": train_tot_loss,
                     }
                 )
         val_images = []
@@ -365,7 +370,7 @@ def main(model_target=None):
                 gender_list = ['밀리터리', '매니쉬', '유니섹스', '걸리쉬', '우아한', '섹시한']
                 embellishment_list = ['장식이 없는', '포인트 장식이 있는', '장식이 많은']
                 
-                if len(val_images) <= 108:
+                if len(val_batch) != a.batch_size:
                     try:
                         val_images.append(
                             wandb.Image(
@@ -469,8 +474,8 @@ def main(model_target=None):
                 # wandb
                 wandb.log(
                     {
-                        "Examples": val_images,
-                        "val_loss": val_loss,
+                        f"Examples_{model_target}": val_images,
+                        f"val_loss_{model_target}": val_loss,
                     }
                 )
         
@@ -504,7 +509,7 @@ def main(model_target=None):
                 )
 
         if (epoch + 1) % 20 == 0:
-            if model_target is not None:
+            if model_target is None:
                 print("Saving Model....")
                 torch.save(
                     net.state_dict(), save_path + "/model_" + str(epoch + 1) + ".pkl"
@@ -522,6 +527,9 @@ def main(model_target=None):
                 epoch + 1, time.time() - t1
             )
         )
+
+        # Reset variable
+        train_tot_loss = 0
 
 
 if __name__ == "__main__":
