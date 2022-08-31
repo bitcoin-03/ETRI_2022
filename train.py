@@ -255,16 +255,19 @@ def main():
     wandb.save()
     wandb.watch(net)
     
+    targets = {
+        'daily': 7,
+        'gender': 6,
+        'embel': 3,
+    }
+
     print("Preparing Train....")
     for epoch in range(resume_epoch, a.epochs):
         # Train loop
         net.train()
         t1 = time.time()
-        train_acc = {
-            'daily' : 0,
-            'gender' : 0,
-            'embel' : 0,
-        }
+        train_acc = {k:0 for k,v in targets.items()}
+
         for i, sample in enumerate(train_dataloader):
             optimizer.zero_grad()
             step += 1
@@ -278,22 +281,8 @@ def main():
             loss_embel = criterion['embel'](out_embel, sample['embel_label'])
             loss = loss_daily + loss_gender + loss_embel
 
-            # top1 accuracy
-            train_acc['daily'] += top_k_accuracy_score(
-                sample['daily_label'].detach().cpu().numpy(),
-                out_daily.detach().cpu().numpy(), k=1,
-                labels=[i for i in range(7)]
-            )
-            train_acc['gender'] += top_k_accuracy_score(
-                sample['gender_label'].detach().cpu().numpy(),
-                out_gender.detach().cpu().numpy(), k=1,
-                labels=[i for i in range(6)]
-            )
-            train_acc['embel'] += top_k_accuracy_score(
-                sample['embel_label'].detach().cpu().numpy(),
-                out_embel.detach().cpu().numpy(),k=1,
-                labels=[i for i in range(3)]
-            )
+            # train top1 accuracy
+            top1_acc_cal(train_acc, sample, (out_daily, out_gender, out_embel), targets)
 
             loss.backward()
             optimizer.step()
@@ -325,9 +314,8 @@ def main():
                     "loss_embel": loss_embel.item(),
                 }
             )
-        train_acc['daily'] /= len(train_dataloader)
-        train_acc['gender'] /= len(train_dataloader)
-        train_acc['embel'] /= len(train_dataloader)
+        acc_div_dataloader(train_acc,len(train_dataloader))
+
         wandb.log(
             {
                 "train_acc_daily": train_acc['daily'],
@@ -336,22 +324,14 @@ def main():
                 "train_acc": (train_acc['daily'] + train_acc['gender'] + train_acc['embel'])/3,
             }
         )
-        val_images = []
-        val_loss_items = {
-            "daily_val_loss": [],
-            "gender_val_loss": [],
-            "embel_val_loss": [],
-        }
-        val_acc = {
-            'daily' : 0,
-            'gender' : 0,
-            'embel' : 0,
-        }
+        
         # Validation loop
         with torch.no_grad():
             print("Calculating validation results...")
             net.eval()
-
+            val_images = []
+            val_loss_items = {f'{k}_val_loss':[] for k,v in targets.items()}
+            val_acc = {k:0 for k,v in targets.items()}
             for i, val_batch in enumerate(val_dataloader):
                 for key in val_batch:
                     val_batch[key] = val_batch[key].to(DEVICE)
@@ -363,64 +343,51 @@ def main():
                     torch.argmax(val_out_gender, dim=-1),
                     torch.argmax(val_out_embel, dim=-1),
                 )
-                val_loss_items['daily_val_loss'].append(
-                    val_criterion['daily'](val_out_daily, val_batch["daily_label"]).item()
-                    )
-                val_loss_items['gender_val_loss'].append(
-                    val_criterion['gender'](val_out_gender, val_batch["gender_label"]).item()
-                    )
-                val_loss_items['embel_val_loss'].append(
-                    val_criterion['embel'](val_out_embel, val_batch["embel_label"]).item()
-                    )
+                # val loss
+                for i, (k, v) in enumerate(targets.items()):
+                    temp_pred = (val_out_daily, val_out_gender, val_out_embel)
+                    val_loss_items[f'{k}_val_loss'].append(val_criterion[f'{k}'](temp_pred[i], val_batch[f'{k}_label']).item())
 
-                d = random.randint(0, len(val_batch))
                 daily_list = ["실내복", "가벼운 외출", "오피스룩", "격식차린", "이벤트", "교복", "운동복"]
                 gender_list = ["밀리터리", "매니쉬", "유니섹스", "걸리쉬", "우아한", "섹시한"]
                 embellishment_list = ["장식이 없는", "포인트 장식이 있는", "장식이 많은"]
                 
-                val_acc['daily'] += top_k_accuracy_score(
-                    val_batch["daily_label"].detach().cpu().numpy(),
-                    val_out_daily.detach().cpu().numpy(), k=1,
-                    labels=[i for i in range(7)]
-                )
-                val_acc['gender'] += top_k_accuracy_score(
-                    val_batch["gender_label"].detach().cpu().numpy(),
-                    val_out_gender.detach().cpu().numpy(), k=1,
-                    labels=[i for i in range(6)]
-                )
-                val_acc['embel'] += top_k_accuracy_score(
-                    val_batch["embel_label"].detach().cpu().numpy(),
-                    val_out_embel.detach().cpu().numpy(),k=1,
-                    labels=[i for i in range(3)]
-                )
+                # val top1 accuracy
+                top1_acc_cal(val_acc, val_batch, (val_out_daily, val_out_gender, val_out_embel), targets)
 
                 if len(val_images) < 108:
-                    val_images.append(
-                        wandb.Image(
-                            val_batch["image"][d],
-                            caption="""
-                            Pred/Truth
-                            일상성 : {} / {}, 
-                            성 : {} / {}, 
-                            장식성 : {} / {}
-                        """.format(
-                                daily_list[preds[0][d].item()],
-                                daily_list[val_batch["daily_label"][d]],
-                                gender_list[preds[1][d].item()],
-                                gender_list[val_batch["gender_label"][d]],
-                                embellishment_list[preds[2][d].item()],
-                                embellishment_list[val_batch["embel_label"][d]],
-                            ),
+                    image_cnt = 1
+                    if len(val_dataloader) <=108:
+                        image_cnt = 108//len(val_dataloader)
+                        # val_batch : 4 , val_dataloader : 36
+                    for j in range(image_cnt):
+                        d = random.randint(0, len(val_batch['daily_label'])-1)
+                        image_check = image_correct_check(
+                            daily_list[preds[0][d].item()],
+                            daily_list[val_batch["daily_label"][d]], 
+                            gender_list[preds[1][d].item()],
+                            gender_list[val_batch["gender_label"][d]], 
+                            embellishment_list[preds[2][d].item()],
+                            embellishment_list[val_batch["embel_label"][d]]
                         )
-                    )
+                        if not image_check: continue
+                        val_images.append(
+                            wandb.Image(
+                            val_batch['image'][d],
+                            caption='''
+                                Pred/Truth
+                                일상성 : {} / {}, 
+                                성 : {} / {}, 
+                                장식성 : {} / {}
+                            '''.format(
+                                *image_check
+                                )
+                            )
+                        )
 
-            val_loss = [
-                np.sum(list(val_loss_items.values())[i]) / len(val_dataloader)
-                for i in range(3)
-            ]
-            val_acc['daily'] /= len(val_dataloader)
-            val_acc['gender'] /= len(val_dataloader)
-            val_acc['embel'] /= len(val_dataloader)
+            val_loss = [np.sum(list(val_loss_items.values())[i])/len(val_dataloader) for i in range(3)]
+            acc_div_dataloader(val_acc,len(val_dataloader))
+
             print(
                 "Validation process "
                 "Epoch [{}/{}], Loss: {:.4f}, "
@@ -486,6 +453,22 @@ def main():
             )
         )
 
+
+def acc_div_dataloader(target,div):
+    for k, v in target.items():
+        target[k] /= div
+
+def top1_acc_cal(target, sample, temp_pred, label_targets):
+    for i, (k, v) in enumerate(label_targets.items()):
+        target[f'{k}'] += top_k_accuracy_score(
+            sample[f'{k}_label'].detach().cpu().numpy(),
+            temp_pred[i].detach().cpu().numpy(), k=1,
+            labels=[j for j in range(v)]
+        )
+def image_correct_check(dp,dl,gp,gl,ep,el):
+    if dp==dl and gp==gl and ep==el:
+        return False
+    return [dp,dl,gp,gl,ep,el]
 
 if __name__ == "__main__":
     main()
