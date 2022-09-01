@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 """
 AI Fashion Coordinator
 (Baseline For Fashion-How Challenge)
@@ -231,4 +230,3 @@ class EfficientNet_emo(nn.Module):
 
 if __name__ == "__main__":
     pass
->>>>>>> efficientnet
