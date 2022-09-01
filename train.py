@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 """
 AI Fashion Coordinator
 (Baseline For Fashion-How Challenge)
@@ -41,7 +42,7 @@ from albumentations.pytorch import ToTensorV2
 
 ##########################
 
-from dataset import ETRIDataset_emo
+from dataset import ETRIDataset_emo, ETRIDataset_normalize
 from networks import *
 
 import pandas as pd
@@ -58,12 +59,16 @@ import numpy as np
 from pathlib import Path
 import glob, re
 
-
-
+from loss import loss_save
+from sklearn.metrics import top_k_accuracy_score
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--model", type=str, default="Baseline_ResNet_emo")
-parser.add_argument("--version", type=str, default="Baseline_ResNet_emo")
+parser.add_argument(
+    "--model", type=str, default="Baseline_ResNet_emo"
+)
+parser.add_argument(
+    "--version", type=str, default="Baseline_ResNet_emo"
+)
 parser.add_argument(
     "--epochs", default=100, type=int, metavar="N", help="number of total epochs to run"
 )
@@ -84,14 +89,21 @@ parser.add_argument(
     "--seed", default=None, type=int, help="seed for initializing training. "
 )
 # models 안에 저장되는 이름과 wandb 실험 앞에 붙는 이름입니다.
-parser.add_argument("--name", default="exp", help="model save at {exp_num}_모델이름")
+parser.add_argument(
+    "--name", default="exp", help="model save at {exp_num}_모델이름"
+)
 # 실험에 대한 설명입니다.(실험 구분 목적) wandb에 exp_모델이름 뒤에 붙습니다.
 parser.add_argument(
     "--explan", default="", help="experiment description, ex. exp_efficientnet_{explan}"
 )
 # 10에폭마다 체크포인트를 저장하게 구현하였고, 만약 20에폭까지 학습됐고, 이어서 학습하고 싶으시면
 # model_resume_20.pth를 쓰시면 됩니다. 그럼 21에폭부터 학습이 이어집니다.
-parser.add_argument("--resume_from", type=str, default=None, help="model_resume_20.pth")
+parser.add_argument(
+    "--resume_from", type=str, default=None, help="model_resume_20.pth"
+)
+parser.add_argument(
+    "--criterion", type=str, default="cross_entropy", help="criterion type (default: cross_entropy)"
+)
 
 
 a = parser.parse_args()
@@ -121,26 +133,28 @@ def get_transforms(need=("train", "val")):
     if "train" in need:
         transformations["train"] = Compose(
             [
-                HorizontalFlip(p=0.5),
-                # ShiftScaleRotate(p=0.5),
-                HueSaturationValue(
-                    hue_shift_limit=0.2,
-                    sat_shift_limit=0.2,
-                    val_shift_limit=0.2,
-                    p=0.5,
-                ),
-                RandomBrightnessContrast(
-                    brightness_limit=(-0.1, 0.1), contrast_limit=(-0.1, 0.1), p=0.5
-                ),
-                ColorJitter(p=0.5),
-                ToTensorV2(p=1.0),
+                # HorizontalFlip(p=0.5),
+                # # ShiftScaleRotate(p=0.5),
+                # HueSaturationValue(
+                #     hue_shift_limit=0.2,
+                #     sat_shift_limit=0.2,
+                #     val_shift_limit=0.2,
+                #     p=0.5,
+                # ),
+                # RandomBrightnessContrast(
+                #     brightness_limit=(-0.1, 0.1), contrast_limit=(-0.1, 0.1), p=0.5
+                # ),
+                # ColorJitter(p=0.5),
+                # CLAHE(),
+                Normalize(),
+                # ToTensorV2(p=1.0),
             ],
             p=1.0,
         )
     if "val" in need:
         transformations["val"] = Compose(
             [
-                ToTensorV2(p=1.0),
+                # ToTensorV2(p=1.0),
             ],
             p=1.0,
         )
@@ -165,6 +179,8 @@ def main(model_target=None):
         net = Baseline_ResNet_emo.to(DEVICE)
     elif a.model == "EfficientNet_emo":
         net = EfficientNet_emo(model_target).to(DEVICE)
+    elif a.model == "EfficientNetV2_emo":
+        net = EfficientNetV2_emo().to(DEVICE)
 
     print("Loading data....")
     # 경로는 각자 맞춰주시면 될것같습니다.
@@ -217,7 +233,9 @@ def main(model_target=None):
         optimizer = torch.optim.Adam(net.parameters(), lr=a.lr)
 
     # optimizer = torch.optim.Adam(net.parameters(), lr=a.lr)
-    criterion = nn.CrossEntropyLoss().to(DEVICE)
+    # criterion = nn.CrossEntropyLoss().to(DEVICE)
+    criterion = loss_save(a.criterion, train_dataset)
+    val_criterion = loss_save(a.criterion, val_dataset)
 
     total_step = len(train_dataloader)
     val_total_step = len(val_dataloader)
@@ -248,7 +266,11 @@ def main(model_target=None):
         # Train loop
         net.train()
         t1 = time.time()
-
+        train_acc = {
+            'daily' : 0,
+            'gender' : 0,
+            'embel' : 0,
+        }
         for i, sample in enumerate(train_dataloader):
             optimizer.zero_grad()
             step += 1
@@ -267,10 +289,27 @@ def main(model_target=None):
             else: 
                 out_daily, out_gender, out_embel = net(sample)
 
-                loss_daily = criterion(out_daily, sample["daily_label"])
-                loss_gender = criterion(out_gender, sample["gender_label"])
-                loss_embel = criterion(out_embel, sample["embel_label"])
+                loss_daily = criterion['daily'](out_daily, sample['daily_label'])
+                loss_gender = criterion['gender'](out_gender, sample['gender_label'])
+                loss_embel = criterion['embel'](out_embel, sample['embel_label'])
                 loss = loss_daily + loss_gender + loss_embel
+
+            # top1 accuracy
+            train_acc['daily'] += top_k_accuracy_score(
+                sample['daily_label'].detach().cpu().numpy(),
+                out_daily.detach().cpu().numpy(), k=1,
+                labels=[i for i in range(7)]
+            )
+            train_acc['gender'] += top_k_accuracy_score(
+                sample['gender_label'].detach().cpu().numpy(),
+                out_gender.detach().cpu().numpy(), k=1,
+                labels=[i for i in range(6)]
+            )
+            train_acc['embel'] += top_k_accuracy_score(
+                sample['embel_label'].detach().cpu().numpy(),
+                out_embel.detach().cpu().numpy(),k=1,
+                labels=[i for i in range(3)]
+            )
 
             loss.backward()
             optimizer.step()
@@ -323,6 +362,17 @@ def main(model_target=None):
                         f"loss_{model_target}": train_tot_loss,
                     }
                 )
+        train_acc['daily'] /= len(train_dataloader)
+        train_acc['gender'] /= len(train_dataloader)
+        train_acc['embel'] /= len(train_dataloader)
+        wandb.log(
+            {
+                "train_acc_daily": train_acc['daily'],
+                "train_acc_gender": train_acc['gender'],
+                "train_acc_embel": train_acc['embel'],
+                "train_acc": (train_acc['daily'] + train_acc['gender'] + train_acc['embel'])/3,
+            }
+        )
         val_images = []
         if model_target is None:
             val_loss_items = {
@@ -332,6 +382,11 @@ def main(model_target=None):
             }
         else:
             val_loss_items = []
+        val_acc = {
+            'daily' : 0,
+            'gender' : 0,
+            'embel' : 0,
+        }
         # Validation loop
         with torch.no_grad():
             print("Calculating validation results...")
@@ -349,9 +404,9 @@ def main(model_target=None):
                         torch.argmax(val_out_gender, dim=-1),
                         torch.argmax(val_out_embel, dim=-1)
                     )
-                    val_loss_items['daily_val_loss'].append(criterion(val_out_daily, val_batch["daily_label"]).item())
-                    val_loss_items['gender_val_loss'].append(criterion(val_out_gender, val_batch["gender_label"]).item())
-                    val_loss_items['embel_val_loss'].append(criterion(val_out_embel, val_batch["embel_label"]).item())
+                    val_loss_items['daily_val_loss'].append(val_criterion['daily'](val_out_daily, val_batch["daily_label"]).item())
+                    val_loss_items['gender_val_loss'].append(val_criterion['gender'](val_out_gender, val_batch["gender_label"]).item())
+                    val_loss_items['embel_val_loss'].append(val_criterion['embel'](val_out_embel, val_batch["embel_label"]).item())
                 else:
                     val_out = net(val_batch)
 
@@ -359,17 +414,33 @@ def main(model_target=None):
                         torch.argmax(val_out, dim=-1)
                     )
                     if model_target == "Daily":
-                        val_loss_items.append(criterion(val_out, val_batch["daily_label"]))
+                        val_loss_items.append(val_criterion(val_out, val_batch["daily_label"]))
                     elif model_target == "Gender":
-                        val_loss_items.append(criterion(val_out, val_batch["gender_label"]))
+                        val_loss_items.append(val_criterion(val_out, val_batch["gender_label"]))
                     elif model_target == "Embellishment":
-                        val_loss_items.append(criterion(val_out, val_batch["embel_label"]))
+                        val_loss_items.append(val_criterion(val_out, val_batch["embel_label"]))
 
                 d = random.randint(0, len(val_batch) - 1)
                 daily_list = ['실내복', '가벼운 외출', '오피스룩', '격식차린', '이벤트', '교복', '운동복']
                 gender_list = ['밀리터리', '매니쉬', '유니섹스', '걸리쉬', '우아한', '섹시한']
                 embellishment_list = ['장식이 없는', '포인트 장식이 있는', '장식이 많은']
-                
+        
+                val_acc['daily'] += top_k_accuracy_score(
+                    val_batch["daily_label"].detach().cpu().numpy(),
+                    val_out_daily.detach().cpu().numpy(), k=1,
+                    labels=[i for i in range(7)]
+                )
+                val_acc['gender'] += top_k_accuracy_score(
+                    val_batch["gender_label"].detach().cpu().numpy(),
+                    val_out_gender.detach().cpu().numpy(), k=1,
+                    labels=[i for i in range(6)]
+                )
+                val_acc['embel'] += top_k_accuracy_score(
+                    val_batch["embel_label"].detach().cpu().numpy(),
+                    val_out_embel.detach().cpu().numpy(),k=1,
+                    labels=[i for i in range(3)]
+                )
+
                 if len(val_batch) != a.batch_size:
                     try:
                         val_images.append(
@@ -456,6 +527,10 @@ def main(model_target=None):
                         "val_loss_daily": val_loss[0],
                         "val_loss_gender": val_loss[1],
                         "val_loss_embel": val_loss[2],
+                        "val_acc_daily": val_acc['daily'],
+                        "val_acc_gender": val_acc['gender'],
+                        "val_acc_embel": val_acc['embel'],
+                        "val_acc" : (val_acc['daily'] + val_acc['gender'] + val_acc['embel'])/3,
                     }
                 )
             else:

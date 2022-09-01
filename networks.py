@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 """
 AI Fashion Coordinator
 (Baseline For Fashion-How Challenge)
@@ -28,6 +29,7 @@ Update: 2022.04.20.
 """
 import torch.nn as nn
 import torchvision.models as models
+import torch
 
 ### 라이브러리 설치 ####
 import subprocess
@@ -36,7 +38,9 @@ import sys
 try:
     from efficientnet_pytorch import EfficientNet
 except ImportError:
-    subprocess.check_call([sys.executable, "-m", "pip", "install", 'efficientnet_pytorch'])
+    subprocess.check_call(
+        [sys.executable, "-m", "pip", "install", "efficientnet_pytorch"]
+    )
 finally:
     from efficientnet_pytorch import EfficientNet
 ##########################
@@ -96,6 +100,44 @@ class Baseline_ResNet_emo(nn.Module):
         out_daily = self.daily_linear(flatten)
         out_gender = self.gender_linear(flatten)
         out_embel = self.embel_linear(flatten)
+
+        return out_daily, out_gender, out_embel
+
+
+class EfficientNetV2_emo(nn.Module):
+    def __init__(self):
+        super(EfficientNetV2_emo, self).__init__()
+        model = torch.hub.load(
+            "hankyul2/EfficientNetV2-pytorch",
+            "efficientnet_v2_l",
+            pretrained=True,
+            nclass=1,
+        )
+        tmp = list(model.children())
+        nc = list(model.children())[2][-1].in_features
+
+        self.stem = tmp[0]
+        self.blocks = tmp[1]
+
+        self.head = nn.Sequential(
+            tmp[2][0],
+            nn.AdaptiveAvgPool2d((1, 1)),
+            nn.Flatten(),
+            nn.Dropout(p=0.1, inplace=True),
+        )
+
+        self.daily_linear = nn.Linear(nc, 7)
+        self.gender_linear = nn.Linear(nc, 6)
+        self.embel_linear = nn.Linear(nc, 3)
+
+    def forward(self, x):
+        x = self.stem(x["image"])
+        x = self.blocks(x)
+        x = self.head(x)
+
+        out_daily = self.daily_linear(x)
+        out_gender = self.gender_linear(x)
+        out_embel = self.embel_linear(x)
 
         return out_daily, out_gender, out_embel
 
@@ -189,3 +231,4 @@ class EfficientNet_emo(nn.Module):
 
 if __name__ == "__main__":
     pass
+>>>>>>> efficientnet
