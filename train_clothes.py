@@ -72,7 +72,7 @@ class Config:
     criterion = "focal"
 
     name = "effV2L_" # model save at {exp_num}_모델이름"
-    explan =  "clothes/default/pad[b]/coarse,grid[b]," # experiment description, ex. exp_efficientnet_{explan}
+    explan =  "test_clothes/default/pad[b]/coarse,grid[b]," # experiment description, ex. exp_efficientnet_{explan}
     resume_from =  ""  # ex) model_resume_20.pth
 
     # csv_path = "/content/drive/MyDrive/Fashion-How/data/task1_data/info_etri20_emotion_tr_val_simple.csv"
@@ -149,15 +149,18 @@ def main():
         os.makedirs(save_path)
 
     # 모델은 parser로 network.py에 구현되어 있는 클래스 이름을 입력받아서 생성되게끔 했습니다.
+    models = {
+        "Baseline_ResNet_emo" : Baseline_ResNet_emo,
+        "EfficientNet_emo" : EfficientNet_emo,
+        "EfficientNet_emo_clothes" : EfficientNet_emo_clothes,
+        "EfficientNetV2_emo" : EfficientNetV2_emo,
+        "EfficientNetV2_emo_clothes" : EfficientNetV2_emo_clothes,
+    }
     print("Loading model...")
-    if Config.model == "Baseline_ResNet_emo":
-        net = Baseline_ResNet_emo.to(DEVICE)
-    elif Config.model == "EfficientNet_emo":
-        net = EfficientNet_emo().to(DEVICE)
-    elif Config.model == "EfficientNetV2_emo":
-        net = EfficientNetV2_emo().to(DEVICE)
-    elif Config.model == "EfficientNetV2_emo_clothes":
-        net = EfficientNetV2_emo_clothes().to(DEVICE)
+    if Config.model in models:
+        net = models[Config.model]().to(DEVICE)
+    else:
+        raise Exception('모델명이 이상해요!!')
     print("Loading data....")
     aug = get_transforms()
     df = pd.read_csv(Config.csv_path)
@@ -352,7 +355,7 @@ def main():
                 )
                                 # val loss
                 for i, (k, v) in enumerate(targets.items()):
-                    temp_pred = (val_out_daily, val_out_gender, val_out_embel)
+                    temp_pred = (val_out_daily, val_out_gender, val_out_embel, val_out_clothes)
                     val_loss_items[f'{k}_val_loss'].append(val_criterion[f'{k}'](temp_pred[i], val_batch[f'{k}_label']).item())
 
 
@@ -382,19 +385,20 @@ def main():
                             clothes_list[val_batch["clothes_label"][d]],
                         )
                         if not image_check: continue
-                    val_images.append(
-                        wandb.Image(
-                            val_batch['image'][d],
-                            caption='''
-                            Pred/Truth
-                            일상성 : {} / {}, 
-                            성 : {} / {}, 
-                            장식성 : {} / {}
-                            '''.format(
-                                *image_check
-                                )
+                        val_images.append(
+                            wandb.Image(
+                                val_batch['image'][d],
+                                caption='''
+                                Pred/Truth
+                                일상성 : {} / {}, 
+                                성 : {} / {}, 
+                                장식성 : {} / {},
+                                종류 : {} / {}
+                                '''.format(
+                                    *image_check
+                                    )
+                            )
                         )
-                    )
 
             val_loss = [np.sum(list(val_loss_items.values())[i])/len(val_dataloader) for i in range(4)]
             acc_div_dataloader(val_acc,len(val_dataloader))
@@ -424,7 +428,7 @@ def main():
             )
             if total_val_acc > best_val_acc: 
                 print(
-                    f"New best model for val f1-score : {total_val_acc:4.4}! saving the best model.."
+                    f"New best model for val_acc score : {total_val_acc:4.4}! saving the best model.."
                 )
                 torch.save(
                     net.state_dict(), save_path + "/model_best" + ".pkl"
@@ -519,10 +523,10 @@ def top1_acc_cal(target, sample, temp_pred, label_targets):
             temp_pred[i].detach().cpu().numpy(), k=1,
             labels=[j for j in range(v)]
         )
-def image_correct_check(dp,dl,gp,gl,ep,el):
-    if dp==dl and gp==gl and ep==el:
+def image_correct_check(dp,dl,gp,gl,ep,el,cp,cl):
+    if dp==dl and gp==gl and ep==el and cp==cl:
         return False
-    return [dp,dl,gp,gl,ep,el]
+    return [dp,dl,gp,gl,ep,el,cp,cl]
 
 
 if __name__ == '__main__':
