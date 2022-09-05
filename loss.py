@@ -14,7 +14,7 @@ class FocalLoss(nn.Module):
         self.gamma = gamma
         self.reduction = reduction
 
-    def forward(self, input_tensor, target_tensor,clss):
+    def forward(self, input_tensor, target_tensor):
         log_prob = F.log_softmax(input_tensor, dim=-1)
         prob = torch.exp(log_prob)
         return F.nll_loss(
@@ -187,6 +187,7 @@ _criterion_entrypoints = {
     'label_smoothing': LabelSmoothingLoss,
     "LADE": LADELoss,
     "LDAM" : LDAMLoss,
+    "WCE" : nn.CrossEntropyLoss,
 }
 
 
@@ -207,13 +208,15 @@ def create_criterion(criterion_name, **kwargs):
     return criterion
 
 # loss
-def loss_save(name, loss_data):
+def loss_save(name, loss_data, with_clothes = False):
     DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     criterion = {
         'daily': 7,
         'gender': 6,
         'embel': 3,
     }
+    if with_clothes == True:
+        criterion['clothes'] = 14
     if name == 'LDAM':
         beta = 0.9999
         for k,v in criterion.items():
@@ -225,9 +228,25 @@ def loss_save(name, loss_data):
             per_cls_weights = per_cls_weights / np.sum(per_cls_weights) * len(train_sample)
             per_cls_weights = torch.FloatTensor(per_cls_weights).to(DEVICE)
             criterion[k] = create_criterion(name, cls_num_list=train_sample, max_m=0.5, s=30, weight=per_cls_weights).to(DEVICE)
+    
+    elif name == 'WCE': # weighted cross entropy
+        daily_cnt = [465, 5580, 866, 1358, 448, 113, 351]
+        gender_cnt = [116, 743, 2268, 2224, 3409, 421]
+        embel_cnt = [4993, 2755, 1433]
+        target_cnt = (daily_cnt,gender_cnt,embel_cnt)
+        normed_weights = [0 for _ in range(len(criterion))]
+        for i in range(len(criterion)):
+            normed_weights[i] = [1 - (x / sum(target_cnt[i])) for x in target_cnt[i]]
+            normed_weights[i] = torch.FloatTensor(normed_weights[i]).to(DEVICE)
+        j = 0
+        for k,v in criterion.items():
+            criterion[k] = create_criterion(name, weight=normed_weights[j]).to(DEVICE)
+            j+=1
+
     elif name in ['focal_2', 'focal', 'cross_entropy']:
         for k,v in criterion.items():
             criterion[k] = create_criterion(name).to(DEVICE)
+
     else:
         for k,v in criterion.items():
             criterion[k] = create_criterion(name, classes=v).to(DEVICE)

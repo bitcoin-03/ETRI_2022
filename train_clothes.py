@@ -40,7 +40,7 @@ from albumentations.pytorch import ToTensorV2
 
 ##########################
 
-from dataset import ETRIDataset_emo, ETRIDataset_normalize
+from dataset import ETRIDataset_emo, ETRIDataset_normalize, ETRIDataset_emo_clothes
 from networks import *
 from tqdm import tqdm
 
@@ -62,22 +62,24 @@ from loss import loss_save
 from sklearn.metrics import top_k_accuracy_score
 
 class Config:
-    model = "EfficientNetV2_emo"
+    model = "EfficientNetV2_emo_clothes"
     epochs =  100
-    lr = 0.00005 # 0.0001
+    lr = 0.00005
     batch_size = 16
     seed = 42
     num_workers = 2
     image_size = 380
     criterion = "focal"
 
-    name = "exp" # model save at {exp_num}_모델이름"
-    explan = "v2_LS0.1_dropout_aug_ADAMW" # experiment description, ex. exp_efficientnet_{explan}
-    resume_from = ""  # ex) model_resume_20.pth
+    name = "effV2L_" # model save at {exp_num}_모델이름"
+    explan =  "clothes/default/pad[b]/coarse,grid[b]," # experiment description, ex. exp_efficientnet_{explan}
+    resume_from =  ""  # ex) model_resume_20.pth
 
+    # csv_path = "/content/drive/MyDrive/Fashion-How/data/task1_data/info_etri20_emotion_tr_val_simple.csv"
     csv_path = "/content/drive/MyDrive/Fashion-How/task1_data/info_etri20_emotion_tr_val_stratified_clothes.csv"
-    # "info_etri20_emotion_tr_val_simple_stratify_daily_gender.csv"
-    data_path =  "/content/drive/MyDrive/Fashion-How/data/task1_data/train/"
+    data_path = "/content/drive/MyDrive/Fashion-How/data/task1_data/train/"
+    # data_path = "/content/drive/MyDrive/Fashion-How/data/task1_data_masked_white/train/"
+    # data_path = "/content/drive/MyDrive/Fashion-How/data/task1_data_masked/train/"
 
 
 def to_dict(config):
@@ -123,7 +125,6 @@ def get_transforms(need=("train", "val")):
             p=1.0,
         )
     if "val" in need:
-
         # transformations["val"] = Compose(
         #     [
         #         ToTensorV2(p=1.0),
@@ -149,21 +150,26 @@ def main():
 
     # 모델은 parser로 network.py에 구현되어 있는 클래스 이름을 입력받아서 생성되게끔 했습니다.
     print("Loading model...")
-    # net = EfficientNet_emo().to(DEVICE)
-    if Config.model == "Baseline_ResNet_emo": net = Baseline_ResNet_emo.to(DEVICE)
-    elif Config.model == "EfficientNet_emo": net = EfficientNet_emo().to(DEVICE)
-    elif Config.model == "EfficientNetV2_emo": net = EfficientNetV2_emo().to(DEVICE)
-    
+    if Config.model == "Baseline_ResNet_emo":
+        net = Baseline_ResNet_emo.to(DEVICE)
+    elif Config.model == "EfficientNet_emo":
+        net = EfficientNet_emo().to(DEVICE)
+    elif Config.model == "EfficientNetV2_emo":
+        net = EfficientNetV2_emo().to(DEVICE)
+    elif Config.model == "EfficientNetV2_emo_clothes":
+        net = EfficientNetV2_emo_clothes().to(DEVICE)
     print("Loading data....")
     aug = get_transforms()
     df = pd.read_csv(Config.csv_path)
-    train_dataset = ETRIDataset_emo(
+    
+    train_dataset = ETRIDataset_emo_clothes(
         df,
         base_path=Config.data_path,
         image_size=Config.image_size,
         type="train",
         transform=aug["train"],
     )
+
     train_dataloader = torch.utils.data.DataLoader(
         train_dataset,
         batch_size=Config.batch_size,
@@ -172,13 +178,14 @@ def main():
         pin_memory=True,
     )
 
-    val_dataset = ETRIDataset_emo(
+    val_dataset = ETRIDataset_emo_clothes(
         df,
         base_path=Config.data_path,
         image_size=Config.image_size,
         type="val",
         transform=aug["val"],
     )
+
     val_dataloader = torch.utils.data.DataLoader(
         val_dataset,
         batch_size=Config.batch_size,
@@ -204,8 +211,8 @@ def main():
         optimizer = torch.optim.AdamW(net.parameters(), lr=Config.lr, weight_decay=0.001)
 
     # criterion = nn.CrossEntropyLoss().to(DEVICE)
-    criterion = loss_save(Config.criterion, train_dataset, with_clothes = False)
-    val_criterion = loss_save(Config.criterion, val_dataset, with_clothes = False)
+    criterion = loss_save(name = Config.criterion, loss_data = train_dataset, with_clothes = True)
+    val_criterion = loss_save(name = Config.criterion, loss_data = val_dataset, with_clothes = True)
 
     total_step = len(train_dataloader)
     val_total_step = len(val_dataloader)
@@ -230,6 +237,7 @@ def main():
         'daily': 7,
         'gender': 6,
         'embel': 3,
+        'clothes': 14,
     }
 
     """ define loss scaler for automatic mixed precision """
@@ -249,21 +257,24 @@ def main():
                 # Casts operations to mixed precision 
                 step += 1
                 for key in sample:
-                    sample[key] = sample[key].to(DEVICE)
+                    sample[key] = sample[key].to(DEVICE)                  
 
-                out_daily, out_gender, out_embel = net(sample) # pred
+                out_daily, out_gender, out_embel, out_clothes = net(sample)
 
                 loss_daily = criterion['daily'](out_daily, sample['daily_label'])
                 loss_gender = criterion['gender'](out_gender, sample['gender_label'])
                 loss_embel = criterion['embel'](out_embel, sample['embel_label'])
+                loss_clothes = criterion['clothes'](out_clothes, sample['clothes_label'])
+
                 loss = loss_daily + loss_gender + loss_embel
+                loss_with_clothes = loss_daily + loss_gender + loss_embel + loss_clothes
 
                 # train top1 accuracy
-                top1_acc_cal(train_acc, sample, (out_daily, out_gender, out_embel), targets)
+                top1_acc_cal(train_acc, sample, (out_daily, out_gender, out_embel, out_clothes), targets)
 
             # Scales the loss, and calls backward() 
             # to create scaled gradients 
-            scaler.scale(loss).backward()
+            scaler.scale(loss_with_clothes).backward()
 
             # Unscales gradients and calls 
             # or skips optimizer.step() 
@@ -274,17 +285,19 @@ def main():
 
             if (i + 1) % 10 == 0:
                 print(
-                    "Train process"
-                    "Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}, "
-                    "Loss_daily: {:.4f}, Loss_gender: {:.4f}, Loss_embel: {:.4f}, Time : {:2.3f}".format(
+                    "Train process "
+                    "Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}, Loss_with_clothes: {:.4f}, "
+                    "Loss_daily: {:.4f}, Loss_gender: {:.4f}, Loss_embel: {:.4f}, Loss_clothes: {:.4f}, Time : {:2.3f}".format(
                         epoch + 1,
                         Config.epochs,
                         i + 1,
                         total_step,
                         loss.item(),
+                        loss_with_clothes.item(),
                         loss_daily.item(),
                         loss_gender.item(),
                         loss_embel.item(),
+                        loss_clothes.item(), #
                         time.time() - t0,
                     )
                 )
@@ -294,9 +307,11 @@ def main():
             wandb.log(
                 {
                     "loss": loss.item(),
+                    "loss_with_clothes" :  loss_with_clothes.item(),
                     "loss_daily": loss_daily.item(),
                     "loss_gender": loss_gender.item(),
                     "loss_embel": loss_embel.item(),
+                    "loss_clothes" : loss_clothes.item(),
                 }
             )
         acc_div_dataloader(train_acc,len(train_dataloader))
@@ -306,6 +321,9 @@ def main():
                 "train_acc_daily": train_acc['daily'],
                 "train_acc_gender": train_acc['gender'],
                 "train_acc_embel": train_acc['embel'],
+                "train_acc_clothes": train_acc['clothes'],
+
+                "train_acc_with_clothes": (train_acc['daily'] + train_acc['gender'] + train_acc['embel'] + train_acc['clothes'])/4,
                 "train_acc": (train_acc['daily'] + train_acc['gender'] + train_acc['embel'])/3,
             }
         )
@@ -324,25 +342,27 @@ def main():
                 for key in val_batch:
                     val_batch[key] = val_batch[key].to(DEVICE)
 
-                val_out_daily, val_out_gender, val_out_embel = net(val_batch)
+                val_out_daily, val_out_gender, val_out_embel, val_out_clothes = net(val_batch)
 
                 preds = (
                     torch.argmax(val_out_daily, dim=-1),
                     torch.argmax(val_out_gender, dim=-1),
                     torch.argmax(val_out_embel, dim=-1),
+                    torch.argmax(val_out_clothes, dim=-1),
                 )
-                # val loss
+                                # val loss
                 for i, (k, v) in enumerate(targets.items()):
                     temp_pred = (val_out_daily, val_out_gender, val_out_embel)
                     val_loss_items[f'{k}_val_loss'].append(val_criterion[f'{k}'](temp_pred[i], val_batch[f'{k}_label']).item())
 
-                
+
                 daily_list = ['실내복', '가벼운 외출', '오피스룩', '격식차린', '이벤트', '교복', '운동복']
                 gender_list = ['밀리터리', '매니쉬', '유니섹스', '걸리쉬', '우아한', '섹시한']
                 embellishment_list = ['장식이 없는', '포인트 장식이 있는', '장식이 많은']
+                clothes_list = ['Blouse', 'Cardigan', 'Coat', 'Jacket', 'Jumper', 'Knit', 'Onepeice', 'Pants', 'Shirt', 'Skirt', 'Sweater', 'Vest', 'BO', 'BT']
 
                 # val top1 accuracy
-                top1_acc_cal(val_acc, val_batch, (val_out_daily, val_out_gender, val_out_embel), targets)
+                top1_acc_cal(val_acc, val_batch, (val_out_daily, val_out_gender, val_out_embel, val_out_clothes), targets)
 
                 if len(val_images) < 108:
                     image_cnt = 1
@@ -357,7 +377,9 @@ def main():
                             gender_list[preds[1][d].item()],
                             gender_list[val_batch["gender_label"][d]], 
                             embellishment_list[preds[2][d].item()],
-                            embellishment_list[val_batch["embel_label"][d]]
+                            embellishment_list[val_batch["embel_label"][d]],
+                            clothes_list[preds[3][d].item()],
+                            clothes_list[val_batch["clothes_label"][d]],
                         )
                         if not image_check: continue
                     val_images.append(
@@ -374,24 +396,28 @@ def main():
                         )
                     )
 
-            val_loss = [np.sum(list(val_loss_items.values())[i])/len(val_dataloader) for i in range(3)]
+            val_loss = [np.sum(list(val_loss_items.values())[i])/len(val_dataloader) for i in range(4)]
             acc_div_dataloader(val_acc,len(val_dataloader))
             total_val_acc = (val_acc['daily'] + val_acc['gender'] + val_acc['embel'])/3
             print(
                 "Validation process "
-                "Epoch [{}/{}], Loss: {:.4f}, "
-                "Loss_daily: {:.4f}, Loss_gender: {:.4f}, Loss_embel: {:.4f}, "
-                "val_acc_daily: {:.4f}, val_acc_gender: {:.4f}, val_acc_embel: {:.4f}, valid_acc: {:.4f}, Time : {:2.3f}"
+                "Epoch [{}/{}], Loss_with_clothes: {:.4f}, Loss: {:.4f}, "
+                "Loss_daily: {:.4f}, Loss_gender: {:.4f}, Loss_embel: {:.4f}, Loss_clothes: {:.4f}, "
+                "val_acc_daily: {:.4f}, val_acc_gender: {:.4f}, val_acc_embel: {:.4f}, val_acc_clothes: {:.4f}, valid_acc_with_clothes: {:.4f}, valid_acc: {:.4f}, Time : {:2.3f}"
                 .format(
                     epoch + 1,
                     Config.epochs,
                     np.sum(val_loss),
+                    np.sum(val_loss) - val_loss[3],
                     val_loss[0],
                     val_loss[1],
                     val_loss[2],
+                    val_loss[3],
                     val_acc['daily'],
                     val_acc['gender'],
                     val_acc['embel'],
+                    val_acc['clothes'],
+                    (val_acc['daily'] + val_acc['gender'] + val_acc['embel'] + val_acc['clothes'])/4,
                     total_val_acc,
                     time.time() - t0,
                 )
@@ -413,10 +439,14 @@ def main():
                     "val_loss_daily": val_loss[0],
                     "val_loss_gender": val_loss[1],
                     "val_loss_embel": val_loss[2],
-                    "val_loss": np.sum(val_loss),
+                    "val_loss_clothes": val_loss[3],
+                    "val_loss": np.sum(val_loss) - val_loss[3],
+                    "val_loss_with_clothes": np.sum(val_loss),
                     "val_acc_daily": val_acc['daily'],
                     "val_acc_gender": val_acc['gender'],
                     "val_acc_embel": val_acc['embel'],
+                    "val_acc_clothes" : val_acc['clothes'],
+                    "val_acc_with_clothes" : (val_acc['daily'] + val_acc['gender'] + val_acc['embel'] + val_acc['clothes'])/4,
                     "val_acc" : total_val_acc,
                 }
             )
@@ -453,7 +483,6 @@ def main():
             )
         )
 
-
 def increment_path(path, exist_ok=False):
     """Automatically increment path, i.e. runs/exp --> runs/exp0, runs/exp1 etc.
     Args:
@@ -470,7 +499,6 @@ def increment_path(path, exist_ok=False):
         n = max(i) + 1 if i else 2
         return f"{path}{n}"
 
-
 def set_seeds(seed):
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
@@ -480,11 +508,9 @@ def set_seeds(seed):
     np.random.seed(seed)
     random.seed(seed)
 
-
 def acc_div_dataloader(target,div):
     for k, v in target.items():
         target[k] /= div
-
 
 def top1_acc_cal(target, sample, temp_pred, label_targets):
     for i, (k, v) in enumerate(label_targets.items()):
@@ -501,3 +527,4 @@ def image_correct_check(dp,dl,gp,gl,ep,el):
 
 if __name__ == '__main__':
     main()
+

@@ -34,11 +34,11 @@ import albumentations as A
 import torch.utils.data
 import numpy as np
 import cv2
+import os
 import time
 from tqdm import tqdm
 import pandas as pd
 from PIL import Image
-
 
 class ETRIDataset_emo(torch.utils.data.Dataset):
     """ Dataset containing emotion categories (Daily, Gender, Embellishment). """
@@ -47,44 +47,99 @@ class ETRIDataset_emo(torch.utils.data.Dataset):
         self.df = df
         self.base_path = base_path
         self.type = type
-        if self.type not in ['train', 'val']:
+        if self.type not in ['train', 'val', 'test']:
             raise KeyError(f'Type [{self.type}] is an invalid type')
         self.image_size = image_size
         if isinstance(self.image_size, int) == False:
             raise KeyError(f'Type [{self.image_size}] is an invalid type')
 
-        # self.to_tensor = trans.ToTensor()
-        # self.normalize = trans.Normalize(mean=[0.485, 0.456, 0.406],
-        #                                       std=[0.229, 0.224, 0.225])
-
-
         self.pretransform = A.Compose([
             A.LongestMaxSize(max_size=self.image_size, p=1.0),
-            A.PadIfNeeded(min_height=self.image_size, min_width=self.image_size, border_mode = cv2.BORDER_CONSTANT, p=1.0)
+            A.PadIfNeeded(min_height=self.image_size, min_width=self.image_size, border_mode = cv2.BORDER_CONSTANT, value = (0, 0, 0), p=1.0)
         ])
         self.transform = transform
         self.posttransform = A.Compose([
             A.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225], max_pixel_value=255.0, p=1.0),
             ToTensorV2(p=1.0),
         ])
+        self.some = 0
 
-        
-
-        # for vis
-        # self.unnormalize = trans.Normalize(mean=[-0.485 / 0.229, -0.456 / 0.224, -0.406 / 0.225],
-        #                                         std=[1 / 0.229, 1 / 0.224, 1 / 0.225])
-        # self.to_pil = trans.ToPILImage()
+        self.sample = df[df['Split'] == type]
+        if self.type is 'test':
+            self.some = -1
 
         self.images = []
-        self.sample = df[df['Split'] == type]
 
         start = time.time()
-        for row in tqdm(self.sample.itertuples()):
-            bbox_xmin = row[3]
-            bbox_ymin = row[4]
-            bbox_xmax = row[5]
-            bbox_ymax = row[6]
-            image = Image.open(base_path + row[2])
+        for idx, row in tqdm(enumerate(self.sample.itertuples())):
+            bbox_xmin = row[3+self.some]
+            bbox_ymin = row[4+self.some]
+            bbox_xmax = row[5+self.some]
+            bbox_ymax = row[6+self.some]
+            image = Image.open(base_path + row[2+self.some])
+            image = image.crop((bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax))
+            image = np.asarray(image)[...,:3]
+
+            self.images.append(image)
+        print(f"{self.type} image load time : {time.time() - start}")
+
+    def __getitem__(self, i):
+
+        image=self.pretransform(image=self.images[i])['image']
+        if self.transform:
+            image = self.transform(image=image)["image"]
+        image=image.astype(np.float32)
+        image=self.posttransform(image=image)["image"]
+
+        ret = {}
+        ret['image'] = image
+        ret['daily_label'] = self.sample['Daily'].iloc[i]   
+        ret['gender_label'] = self.sample['Gender'].iloc[i]
+        ret['embel_label'] = self.sample['Embellishment'].iloc[i]
+
+
+        return ret
+
+    def __len__(self):
+        return len(self.df[self.df.Split == self.type])
+
+
+class ETRIDataset_emo_clothes(torch.utils.data.Dataset):
+    """ Dataset containing emotion categories (Daily, Gender, Embellishment). """
+
+    def __init__(self, df, base_path, image_size, type: str='train', transform = None):
+        self.df = df
+        self.base_path = base_path
+        self.type = type
+        if self.type not in ['train', 'val', 'test']:
+            raise KeyError(f'Type [{self.type}] is an invalid type')
+        self.image_size = image_size
+        if isinstance(self.image_size, int) == False:
+            raise KeyError(f'Type [{self.image_size}] is an invalid type')
+
+        self.pretransform = A.Compose([
+            A.LongestMaxSize(max_size=self.image_size, p=1.0),
+            A.PadIfNeeded(min_height=self.image_size, min_width=self.image_size, border_mode = cv2.BORDER_CONSTANT, value = (0, 0, 0), p=1.0)
+        ])
+        self.transform = transform
+        self.posttransform = A.Compose([
+            A.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225], max_pixel_value=255.0, p=1.0),
+            ToTensorV2(p=1.0),
+        ])
+        self.some = 0
+        self.sample = df[df['Split'] == type]
+        if self.type is 'test':
+            self.some = -1
+
+        self.images = []
+
+        start = time.time()
+        for idx, row in tqdm(enumerate(self.sample.itertuples())):
+            bbox_xmin = row[3+self.some]
+            bbox_ymin = row[4+self.some]
+            bbox_xmax = row[5+self.some]
+            bbox_ymax = row[6+self.some]
+            image = Image.open(base_path + row[2+self.some])
             image = image.crop((bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax))
             image = np.asarray(image)[...,:3]
             self.images.append(image)
@@ -97,16 +152,15 @@ class ETRIDataset_emo(torch.utils.data.Dataset):
             image = self.transform(image=image)["image"]
         image=image.astype(np.float32)
         image=self.posttransform(image=image)["image"]
-        # A.Compose([
-        #     A.Normalize(mean=mean, std=std, max_pixel_value=255.0, p=1.0),
-        #     ToTensorV2(p=1.0)]
-        # )(image=image)["image"]
 
         ret = {}
         ret['image'] = image
         ret['daily_label'] = self.sample['Daily'].iloc[i]   
         ret['gender_label'] = self.sample['Gender'].iloc[i]
         ret['embel_label'] = self.sample['Embellishment'].iloc[i]
+        if self.type is not 'test':
+            ret['clothes_label'] = self.sample['Clothes'].iloc[i]
+
 
         return ret
 
@@ -165,7 +219,6 @@ class ETRIDataset_normalize(torch.utils.data.Dataset):
 
     def __len__(self):
         return len(self.df[self.df.Split == self.type])
-
 
 # class ETRIDataset_emo(torch.utils.data.Dataset):
 #     """ Dataset containing emotion categories (Daily, Gender, Embellishment). """
@@ -227,3 +280,4 @@ class ETRIDataset_normalize(torch.utils.data.Dataset):
 
 #     def __len__(self):
 #         return len(self.df[self.df.Split == self.type])
+
