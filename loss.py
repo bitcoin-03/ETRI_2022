@@ -4,11 +4,88 @@ import torch.nn.functional as F
 import numpy as np
 
 
+class FocalLossWithSmoothing(nn.Module):
+    def __init__(
+        self,
+        classes: int,
+        gamma: int = 1,
+        lb_smooth: float = 0.1,
+        size_average: bool = True,
+        ignore_index: int = None,
+        alpha: float = None,
+    ):
+        """
+        :param gamma:
+        :param lb_smooth:
+        :param ignore_index:
+        :param size_average:
+        :param alpha:
+        """
+        super(FocalLossWithSmoothing, self).__init__()
+        self._num_classes = classes
+        self._gamma = gamma
+        self._lb_smooth = lb_smooth
+        self._size_average = size_average
+        self._ignore_index = ignore_index
+        self._log_softmax = nn.LogSoftmax(dim=1)
+        self._alpha = alpha
+
+        if self._num_classes <= 1:
+            raise ValueError("The number of classes must be 2 or higher")
+        if self._gamma < 0:
+            raise ValueError("Gamma must be 0 or higher")
+        if self._alpha is not None:
+            if self._alpha <= 0 or self._alpha >= 1:
+                raise ValueError("Alpha must be 0 <= alpha <= 1")
+
+    def forward(self, logits, label):
+        """
+        :param logits: (batch_size, class, height, width)
+        :param label:
+        :return:
+        """
+        logits = logits.float()
+        difficulty_level = self._estimate_difficulty_level(logits, label)
+
+        with torch.no_grad():
+            label = label.clone().detach()
+            if self._ignore_index is not None:
+                ignore = label.eq(self._ignore_index)
+                label[ignore] = 0
+            lb_pos, lb_neg = 1.0 - self._lb_smooth, self._lb_smooth / (
+                self._num_classes - 1
+            )
+            lb_one_hot = (
+                torch.empty_like(logits)
+                .fill_(lb_neg)
+                .scatter_(1, label.unsqueeze(1), lb_pos)
+                .detach()
+            )
+        logs = self._log_softmax(logits)
+        loss = -torch.sum(difficulty_level * logs * lb_one_hot, dim=1)
+        if self._ignore_index is not None:
+            loss[ignore] = 0
+        return loss.mean()
+
+    def _estimate_difficulty_level(self, logits, label):
+        """
+        :param logits:
+        :param label:
+        :return:
+        """
+        one_hot_key = torch.nn.functional.one_hot(label, num_classes=self._num_classes)
+        if len(one_hot_key.shape) == 4:
+            one_hot_key = one_hot_key.permute(0, 3, 1, 2)
+        if one_hot_key.device != logits.device:
+            one_hot_key = one_hot_key.to(logits.device)
+        pt = one_hot_key * F.softmax(logits, dim=1)
+        difficulty_level = torch.pow(1 - pt, self._gamma)
+        return difficulty_level
+
 
 # https://discuss.pytorch.org/t/is-this-a-correct-implementation-for-focal-loss-in-pytorch/43327/8
 class FocalLoss(nn.Module):
-    def __init__(self, weight=None,
-                 gamma=2., reduction='mean'):
+    def __init__(self, weight=None, gamma=2.0, reduction="mean"):
         nn.Module.__init__(self)
         self.weight = weight
         self.gamma = gamma
@@ -21,7 +98,7 @@ class FocalLoss(nn.Module):
             ((1 - prob) ** self.gamma) * log_prob,
             target_tensor,
             weight=self.weight,
-            reduction=self.reduction
+            reduction=self.reduction,
         )
 
 
@@ -48,11 +125,12 @@ class F1Loss(nn.Module):
         super().__init__()
         self.classes = classes
         self.epsilon = epsilon
+
     def forward(self, y_pred, y_true):
         assert y_pred.ndim == 2
         assert y_true.ndim == 1
-        y_true = F.one_hot(y_true, self.classes).to(torch.float32) # one_hot 형식으로 맞춤
-        y_pred = F.softmax(y_pred, dim=1) # 합이 1이 되도록
+        y_true = F.one_hot(y_true, self.classes).to(torch.float32)  # one_hot 형식으로 맞춤
+        y_pred = F.softmax(y_pred, dim=1)  # 합이 1이 되도록
 
         tp = (y_true * y_pred).sum(dim=0).to(torch.float32)
         tn = ((1 - y_true) * (1 - y_pred)).sum(dim=0).to(torch.float32)
@@ -66,10 +144,16 @@ class F1Loss(nn.Module):
         f1 = f1.clamp(min=self.epsilon, max=1 - self.epsilon)
         return 1 - f1.mean()
 
+
 # https://github.com/Joonsun-Hwang/imbalance-loss-test/blob/main/Loss%20Test.ipynb
 class LADELoss(nn.Module):
     def __init__(
-        self, classes, img_max=512, prior=0.1, prior_txt=None, remine_lambda=0.1,
+        self,
+        classes,
+        img_max=512,
+        prior=0.1,
+        prior_txt=None,
+        remine_lambda=0.1,
     ):
         super().__init__()
         if img_max is not None or prior_txt is not None:
@@ -101,7 +185,7 @@ class LADELoss(nn.Module):
         loss, first_term, second_term = self.mine_lower_bound(
             x_p, x_q, num_samples_per_cls
         )
-        reg = (second_term ** 2) * self.remine_lambda
+        reg = (second_term**2) * self.remine_lambda
         return loss - reg, first_term, second_term
 
     def forward(self, y_pred, target, q_pred=None):
@@ -128,7 +212,15 @@ class LADELoss(nn.Module):
         loss = -torch.sum(estim_loss * self.cls_weight)
         return loss
 
-def calculate_prior(num_classes, img_max=None, prior=None, prior_txt=None, reverse=False, return_num=False):
+
+def calculate_prior(
+    num_classes,
+    img_max=None,
+    prior=None,
+    prior_txt=None,
+    reverse=False,
+    return_num=False,
+):
     if prior_txt:
         labels = []
         with open(prior_txt) as f:
@@ -140,7 +232,9 @@ def calculate_prior(num_classes, img_max=None, prior=None, prior_txt=None, rever
         img_num_per_cls = []
         for cls_idx in range(num_classes):
             if reverse:
-                num = img_max * (prior ** ((num_classes - 1 - cls_idx) / (num_classes - 1.0)))
+                num = img_max * (
+                    prior ** ((num_classes - 1 - cls_idx) / (num_classes - 1.0))
+                )
             else:
                 num = img_max * (prior ** (cls_idx / (num_classes - 1.0)))
             img_num_per_cls.append(int(num))
@@ -151,9 +245,9 @@ def calculate_prior(num_classes, img_max=None, prior=None, prior_txt=None, rever
     else:
         return img_num_per_cls / img_num_per_cls.sum()
 
+
 # https://github.com/kaidic/LDAM-DRW
 class LDAMLoss(nn.Module):
-
     def __init__(self, cls_num_list, max_m=0.5, weight=None, s=30):
         super(LDAMLoss, self).__init__()
         m_list = 1.0 / np.sqrt(np.sqrt(cls_num_list))
@@ -169,9 +263,11 @@ class LDAMLoss(nn.Module):
         index.scatter_(1, target.data.view(-1, 1), 1)
 
         index_float = index.type(torch.cuda.FloatTensor)
-        print('합성곱',self.m_list[None, :].size(), index_float.transpose(0, 1).size())
+        print("합성곱", self.m_list[None, :].size(), index_float.transpose(0, 1).size())
 
-        batch_m = torch.matmul(self.m_list[None, :], index_float.transpose(0, 1)) # 7 7 x 64
+        batch_m = torch.matmul(
+            self.m_list[None, :], index_float.transpose(0, 1)
+        )  # 7 7 x 64
         batch_m = batch_m.view((-1, 1))
 
         x_m = x - batch_m
@@ -181,13 +277,14 @@ class LDAMLoss(nn.Module):
 
 
 _criterion_entrypoints = {
-    'cross_entropy': nn.CrossEntropyLoss,
-    'f1': F1Loss,
-    'focal': FocalLoss,
-    'label_smoothing': LabelSmoothingLoss,
+    "cross_entropy": nn.CrossEntropyLoss,
+    "f1": F1Loss,
+    "focal": FocalLoss,
+    "label_smoothing": LabelSmoothingLoss,
     "LADE": LADELoss,
-    "LDAM" : LDAMLoss,
-    "WCE" : nn.CrossEntropyLoss,
+    "LDAM": LDAMLoss,
+    "WCE": nn.CrossEntropyLoss,
+    "focal with smoothing": FocalLossWithSmoothing,
 }
 
 
@@ -204,50 +301,57 @@ def create_criterion(criterion_name, **kwargs):
         create_fn = criterion_entrypoint(criterion_name)
         criterion = create_fn(**kwargs)
     else:
-        raise RuntimeError('Unknown loss (%s)' % criterion_name)
+        raise RuntimeError("Unknown loss (%s)" % criterion_name)
     return criterion
 
+
 # loss
-def loss_save(name, loss_data, with_clothes = False):
-    DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+def loss_save(name, loss_data, with_clothes=False):
+    DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     criterion = {
-        'daily': 7,
-        'gender': 6,
-        'embel': 3,
+        "daily": 7,
+        "gender": 6,
+        "embel": 3,
     }
     if with_clothes == True:
-        criterion['clothes'] = 14
-    if name == 'LDAM':
+        criterion["clothes"] = 14
+    if name == "LDAM":
         beta = 0.9999
-        for k,v in criterion.items():
-            print('여기', len(loss_data.indices[f'{k}']),loss_data.indices[f'{k}'])
-            train_sample = np.unique(loss_data.indices[f'{k}'],return_counts=True)[1] # 고유한 원소들만 모음, 배열이 2개가 담긴다. 각 원소들이 등장하는 횟수도 담김
+        for k, v in criterion.items():
+            print("여기", len(loss_data.indices[f"{k}"]), loss_data.indices[f"{k}"])
+            train_sample = np.unique(loss_data.indices[f"{k}"], return_counts=True)[
+                1
+            ]  # 고유한 원소들만 모음, 배열이 2개가 담긴다. 각 원소들이 등장하는 횟수도 담김
             # indices -> numpy문법 index들이 담긴다.
-            effective_num = 1.0 - np.power(beta, train_sample) # class num list 넣으면 되는데
+            effective_num = 1.0 - np.power(beta, train_sample)  # class num list 넣으면 되는데
             per_cls_weights = (1.0 - beta) / np.array(effective_num)
-            per_cls_weights = per_cls_weights / np.sum(per_cls_weights) * len(train_sample)
+            per_cls_weights = (
+                per_cls_weights / np.sum(per_cls_weights) * len(train_sample)
+            )
             per_cls_weights = torch.FloatTensor(per_cls_weights).to(DEVICE)
-            criterion[k] = create_criterion(name, cls_num_list=train_sample, max_m=0.5, s=30, weight=per_cls_weights).to(DEVICE)
-    
-    elif name == 'WCE': # weighted cross entropy
+            criterion[k] = create_criterion(
+                name, cls_num_list=train_sample, max_m=0.5, s=30, weight=per_cls_weights
+            ).to(DEVICE)
+
+    elif name == "WCE":  # weighted cross entropy
         daily_cnt = [465, 5580, 866, 1358, 448, 113, 351]
         gender_cnt = [116, 743, 2268, 2224, 3409, 421]
         embel_cnt = [4993, 2755, 1433]
-        target_cnt = (daily_cnt,gender_cnt,embel_cnt)
+        target_cnt = (daily_cnt, gender_cnt, embel_cnt)
         normed_weights = [0 for _ in range(len(criterion))]
         for i in range(len(criterion)):
             normed_weights[i] = [1 - (x / sum(target_cnt[i])) for x in target_cnt[i]]
             normed_weights[i] = torch.FloatTensor(normed_weights[i]).to(DEVICE)
         j = 0
-        for k,v in criterion.items():
+        for k, v in criterion.items():
             criterion[k] = create_criterion(name, weight=normed_weights[j]).to(DEVICE)
-            j+=1
+            j += 1
 
-    elif name in ['focal_2', 'focal', 'cross_entropy']:
-        for k,v in criterion.items():
+    elif name in ["focal_2", "focal", "cross_entropy"]:
+        for k, v in criterion.items():
             criterion[k] = create_criterion(name).to(DEVICE)
 
     else:
-        for k,v in criterion.items():
+        for k, v in criterion.items():
             criterion[k] = create_criterion(name, classes=v).to(DEVICE)
     return criterion
