@@ -254,7 +254,8 @@ def main():
 
         scaler = torch.cuda.amp.GradScaler()
 
-        for i, sample in enumerate(tqdm(train_dataloader, desc="tqdm-etri")):
+        for i, sample in tqdm(enumerate(train_dataloader), desc="tqdm-etri", total=len(train_dataloader)):
+
             optimizer.zero_grad()
             with torch.cuda.amp.autocast():
                 # Casts operations to mixed precision 

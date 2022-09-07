@@ -71,7 +71,7 @@ class ETRIDataset_emo(torch.utils.data.Dataset):
         self.images = []
 
         start = time.time()
-        for idx, row in tqdm(enumerate(self.sample.itertuples())):
+        for idx, row in tqdm(enumerate(self.sample.itertuples()), total=len(self.sample)):
             bbox_xmin = row[3+self.some]
             bbox_ymin = row[4+self.some]
             bbox_xmax = row[5+self.some]
@@ -134,7 +134,7 @@ class ETRIDataset_emo_clothes(torch.utils.data.Dataset):
         self.images = []
 
         start = time.time()
-        for idx, row in tqdm(enumerate(self.sample.itertuples())):
+        for idx, row in tqdm(enumerate(self.sample.itertuples()), total=len(self.sample)):
             bbox_xmin = row[3+self.some]
             bbox_ymin = row[4+self.some]
             bbox_xmax = row[5+self.some]
