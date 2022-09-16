@@ -43,11 +43,11 @@ DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 def main():
     """ The main function of the test process for performance measurement. """
     net = Baseline_ResNet_emo().to(DEVICE)
-    trained_weights = torch.load('./models/Baseline_ResNet_emo/model_100.pkl',map_location=DEVICE)
+    trained_weights = torch.load('./models/Test_ResNet_emo/model_100.pkl',map_location=DEVICE)
     net.load_state_dict(trained_weights)
 
-    df = pd.read_csv('../data/task1/info_etri20_emotion_test.csv')
-    val_dataset = ETRIDataset_emo(df, base_path='../data/task1/test/')
+    df = pd.read_csv('../TEAM비뜨코인/ETRI_Season3/task1_data/task1_sample/info_etri20_emotion_test.csv')
+    val_dataset = ETRIDataset_emo(df, base_path='../TEAM비뜨코인/ETRI_Season3/task1_data/task1_sample/test/')
     val_dataloader = torch.utils.data.DataLoader(val_dataset, batch_size=128, shuffle=False, num_workers=0)
 
     daily_gt_list = np.array([])
@@ -105,7 +105,12 @@ def get_test_metrics(y_true, y_pred, verbose=True):
     FN = cnf_matrix.sum(axis=1) - np.diag(cnf_matrix)
     TP = np.diag(cnf_matrix)
     TN = cnf_matrix.sum() - (FP + FN + TP)
-
+    # print(f'FP:{FP}')
+    # print(f'FN:{FN}')
+    # print(f'TP:{TP}')
+    # print(f'TN:{TN}')
+    # print(np.sum(TP))
+    # print(np.sum(cnf_matrix))
     top_1 = np.sum(TP)/np.sum(np.sum(cnf_matrix))
     cs_accuracy = TP / cnf_matrix.sum(axis=1)
 
